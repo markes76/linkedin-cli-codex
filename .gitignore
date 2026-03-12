@@ -4,7 +4,7 @@ dist/
 .env
 .idea/
 .vscode/
-output/
+/output/
 coverage/
 playwright-report/
 *.tgz
