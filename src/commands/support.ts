@@ -13,14 +13,20 @@ import { getCommandContext } from "../utils/command.js";
 export async function getApiForCommand(command: Command): Promise<{
   context: CommandContext;
   api: VoyagerApi;
+  close: () => Promise<void>;
 }> {
   const context = getCommandContext(command);
   setColorEnabled(context.color);
 
   const session = await requireSession();
-  const api = new VoyagerApi(new VoyagerClient(session));
+  const client = new VoyagerClient(session);
+  const api = new VoyagerApi(client);
 
-  return { context, api };
+  return {
+    context,
+    api,
+    close: async () => client.close(),
+  };
 }
 
 export async function getSavedSessionStatus(): Promise<{
@@ -43,7 +49,7 @@ export function outputJsonOrTable<T>(context: CommandContext, payload: T, render
 }
 
 export async function readBundledSkill(): Promise<string> {
-  const file = new URL("../../docs/skill.md", import.meta.url);
+  const file = new URL("../docs/skill.md", import.meta.url);
   return readFile(file, "utf8");
 }
 
@@ -54,4 +60,3 @@ export function truncate(value: string | undefined, maxLength = 96): string {
 
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
-

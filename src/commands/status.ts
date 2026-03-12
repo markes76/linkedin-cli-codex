@@ -30,21 +30,26 @@ export function registerStatusCommand(program: Command): void {
         }
 
         try {
-          const api = new VoyagerApi(new VoyagerClient(session));
-          const status = await api.getStatus(session.savedAt);
+          const client = new VoyagerClient(session);
+          try {
+            const api = new VoyagerApi(client);
+            const status = await api.getStatus(session.savedAt);
 
-          if (context.json) {
-            printJson(status);
-            return;
+            if (context.json) {
+              printJson(status);
+              return;
+            }
+
+            printKeyValue([
+              ["Authenticated", status.authenticated ? "yes" : "no"],
+              ["Full name", status.fullName],
+              ["Public identifier", status.publicIdentifier],
+              ["Headline", status.headline],
+              ["Saved at", status.savedAt],
+            ]);
+          } finally {
+            await client.close();
           }
-
-          printKeyValue([
-            ["Authenticated", status.authenticated ? "yes" : "no"],
-            ["Full name", status.fullName],
-            ["Public identifier", status.publicIdentifier],
-            ["Headline", status.headline],
-            ["Saved at", status.savedAt],
-          ]);
         } catch (error) {
           if (!(error instanceof LinkedInAuthError)) {
             throw error;
@@ -65,4 +70,3 @@ export function registerStatusCommand(program: Command): void {
       }),
     );
 }
-

@@ -16,7 +16,10 @@ import type {
 import { paginate } from "../utils/pagination.js";
 import type { VoyagerClient } from "./client.js";
 
-const SEARCH_ACCEPT = "application/vnd.linkedin.normalized+json+2.1";
+const FULL_PROFILE_DECORATION_ID = "com.linkedin.voyager.dash.deco.identity.profile.FullProfile-76";
+const SEARCH_CLUSTERS_QUERY_ID = "voyagerSearchDashClusters.05111e1b90ee7fea15bebe9f9410ced9";
+const MAIN_FEED_QUERY_ID = "voyagerFeedDashMainFeed.923020905727c01516495a0ac90bb475";
+const PROFILE_UPDATES_QUERY_ID = "voyagerFeedDashProfileUpdates.4af00b28d60ed0f1488018948daad822";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -40,6 +43,28 @@ function getPath(value: unknown, path: string[]): unknown {
   }
 
   return current;
+}
+
+function extractCollectionResponse(data: unknown): JsonRecord | undefined {
+  const candidates = [data, getPath(data, ["data"])];
+
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) {
+      continue;
+    }
+
+    if (Array.isArray(candidate.elements)) {
+      return candidate;
+    }
+
+    for (const nested of Object.values(candidate)) {
+      if (isRecord(nested) && Array.isArray(nested.elements)) {
+        return nested;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
@@ -112,6 +137,64 @@ function extractPublicIdentifier(value: unknown): string | undefined {
   return value;
 }
 
+function normalizeLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function splitVisibleLines(value: string | undefined): string[] {
+  const lines: string[] = [];
+
+  for (const rawLine of (value ?? "").split("\n")) {
+    const line = normalizeLine(rawLine);
+
+    if (!line || line === "·") {
+      continue;
+    }
+
+    if (lines.at(-1) === line) {
+      continue;
+    }
+
+    lines.push(line);
+  }
+
+  return lines;
+}
+
+function stripVerificationSuffix(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.replace(/\s+with verification$/i, "").trim();
+  return normalized || undefined;
+}
+
+function isActionLine(value: string): boolean {
+  return [
+    "follow",
+    "connect",
+    "message",
+    "show all",
+    "show more",
+    "view job",
+    "like",
+    "comment",
+    "repost",
+    "send",
+    "save",
+    "apply",
+  ].includes(value.toLowerCase());
+}
+
+function isSearchPostsStopLine(value: string): boolean {
+  return (
+    isActionLine(value) ||
+    /\b\d+\s+(likes?|comments?|reposts?|followers?)\b/i.test(value) ||
+    /visible to anyone on or off linkedin/i.test(value)
+  );
+}
+
 function buildProfileUrl(publicIdentifier?: string): string | undefined {
   return publicIdentifier ? `https://www.linkedin.com/in/${publicIdentifier}/` : undefined;
 }
@@ -159,7 +242,11 @@ function toIsoDate(value: unknown): string | undefined {
 }
 
 function extractTotal(data: unknown): number | undefined {
+  const collection = extractCollectionResponse(data);
+
   return firstDefined(
+    numberValue(getPath(collection, ["metadata", "totalResultCount"])),
+    numberValue(getPath(collection, ["paging", "total"])),
     numberValue(getPath(data, ["paging", "total"])),
     numberValue(getPath(data, ["data", "paging", "total"])),
     numberValue(getPath(data, ["metadata", "totalResultCount"])),
@@ -168,6 +255,22 @@ function extractTotal(data: unknown): number | undefined {
 }
 
 function extractElements(data: unknown): unknown[] {
+  const collection = extractCollectionResponse(data);
+
+  if (collection && Array.isArray(collection.elements)) {
+    return collection.elements.flatMap((element) => {
+      if (isRecord(element) && Array.isArray(element.items)) {
+        return element.items;
+      }
+
+      if (isRecord(element) && Array.isArray(element.elements)) {
+        return element.elements;
+      }
+
+      return [element];
+    });
+  }
+
   const topLevel = getPath(data, ["elements"]);
   if (Array.isArray(topLevel)) {
     return topLevel;
@@ -235,11 +338,17 @@ function parseProfile(data: unknown): ProfileSummary {
       "Unknown member",
     headline: firstDefined(textValue(profile.headline), textValue(miniProfile.occupation)),
     summary: textValue(profile.summary),
-    location: firstDefined(textValue(profile.locationName), textValue(profile.geoLocationName)),
+    location: firstDefined(
+      textValue(profile.locationName),
+      textValue(profile.geoLocationName),
+      textValue(getPath(profile, ["location", "defaultLocalizedName"])),
+      textValue(getPath(profile, ["geoLocation", "defaultLocalizedName"])),
+      textValue(getPath(profile, ["geoLocation", "geo", "defaultLocalizedName"])),
+    ),
     industry: firstDefined(textValue(profile.industryName), textValue(profile.industry)),
     profileUrl: buildProfileUrl(publicIdentifier),
-    followers: numberValue(profile.followersCount),
-    connections: numberValue(profile.connectionsCount),
+    followers: firstDefined(numberValue(profile.followersCount), numberValue(getPath(profile, ["followingInfo", "followerCount"]))),
+    connections: firstDefined(numberValue(profile.connectionsCount), numberValue(profile.numConnections)),
     experience,
     education,
     raw: data,
@@ -252,10 +361,21 @@ function parseSearchResult(type: SearchVertical, item: unknown): SearchResultSum
     return null;
   }
 
+  const searchItem =
+    isRecord(record.item) && isRecord(record.item.entityResult)
+      ? (record.item.entityResult as JsonRecord)
+      : isRecord(record.entityResult)
+        ? (record.entityResult as JsonRecord)
+        : record;
+
   const title = firstDefined(
+    textValue(searchItem.title),
     textValue(record.title),
+    textValue(searchItem.name),
     textValue(record.name),
+    textValue(searchItem.primaryText),
     textValue(record.primaryText),
+    textValue(searchItem.headline),
     textValue(record.headline),
   );
 
@@ -263,22 +383,51 @@ function parseSearchResult(type: SearchVertical, item: unknown): SearchResultSum
     return null;
   }
 
-  const url = textValue(record.navigationUrl) ?? textValue(record.url);
+  const url =
+    firstDefined(
+      textValue(searchItem.navigationUrl),
+      textValue(searchItem.bserpEntityNavigationalUrl),
+      textValue(record.navigationUrl),
+      textValue(record.url),
+    ) ?? undefined;
   const subtitle = firstDefined(
+    textValue(searchItem.primarySubtitle),
     textValue(record.primarySubtitle),
+    textValue(searchItem.headline),
     textValue(record.headline),
+    textValue(searchItem.occupation),
     textValue(record.occupation),
+    textValue(searchItem.subline),
     textValue(record.subline),
   );
 
   return {
-    id: getUrnId(firstDefined(textValue(record.targetUrn), textValue(record.entityUrn))),
+    id: getUrnId(
+      firstDefined(
+        textValue(searchItem.targetUrn),
+        textValue(searchItem.trackingUrn),
+        textValue(record.targetUrn),
+        textValue(record.entityUrn),
+      ),
+    ),
     type,
     title,
     subtitle,
-    location: firstDefined(textValue(record.secondarySubtitle), textValue(record.secondaryText)),
+    location: firstDefined(
+      textValue(searchItem.secondarySubtitle),
+      textValue(record.secondarySubtitle),
+      textValue(searchItem.secondaryText),
+      textValue(record.secondaryText),
+    ),
     url,
-    snippet: firstDefined(textValue(record.summary), textValue(record.insightsResolutionResults), textValue(record.description)),
+    snippet: firstDefined(
+      textValue(searchItem.summary),
+      textValue(record.summary),
+      textValue(searchItem.insightsResolutionResults),
+      textValue(record.insightsResolutionResults),
+      textValue(searchItem.description),
+      textValue(record.description),
+    ),
     raw: item,
   };
 }
@@ -304,36 +453,86 @@ function parseConnection(item: unknown): ConnectionSummary | null {
 }
 
 function parseFeedItem(item: unknown): FeedItemSummary | null {
-  const record = isRecord(item) ? item : null;
-  if (!record) {
+  const root = isRecord(item) ? item : null;
+  if (!root) {
     return null;
   }
 
-  const social = isRecord(record.socialDetail) ? record.socialDetail : {};
+  const aggregatedUpdates = asArray(getPath(root, ["aggregatedContent", "updates"]));
+  const record = isRecord(aggregatedUpdates[0]) ? (aggregatedUpdates[0] as JsonRecord) : root;
+  const social = isRecord(root.socialDetail)
+    ? root.socialDetail
+    : isRecord(record.socialDetail)
+      ? record.socialDetail
+      : {};
   const counts = isRecord(social.totalSocialActivityCounts) ? social.totalSocialActivityCounts : {};
   const commentsState = isRecord(social.commentsState) ? social.commentsState : {};
   const actor = isRecord(record.actor) ? record.actor : {};
   const miniProfile = isRecord(actor.miniProfile) ? actor.miniProfile : {};
+  const actorComponent = isRecord(getPath(record, ["content", "actorComponent"]))
+    ? (getPath(record, ["content", "actorComponent"]) as JsonRecord)
+    : {};
 
   const actorName =
-    firstDefined(textValue(actor.name), joinName(textValue(miniProfile.firstName), textValue(miniProfile.lastName))) ??
+    firstDefined(
+      textValue(actor.name),
+      textValue(actorComponent.title),
+      joinName(textValue(miniProfile.firstName), textValue(miniProfile.lastName)),
+    ) ??
     undefined;
 
-  const actorUrl = firstDefined(textValue(actor.navigationUrl), buildProfileUrl(extractPublicIdentifier(textValue(miniProfile.publicIdentifier))));
+  const actorUrl = firstDefined(
+    textValue(actor.navigationUrl),
+    textValue(actorComponent.navigationUrl),
+    buildProfileUrl(extractPublicIdentifier(textValue(miniProfile.publicIdentifier))),
+  );
 
   const text = firstDefined(
     textValue(getPath(record, ["commentary", "text"])),
+    textValue(getPath(record, ["commentary", "text", "text"])),
+    textValue(getPath(root, ["commentary", "text"])),
+    textValue(getPath(root, ["commentary", "text", "text"])),
     textValue(getPath(record, ["updateMetadata", "commentary"])),
     textValue(getPath(record, ["text"])),
     textValue(getPath(record, ["shareCommentary", "text"])),
   );
 
+  const sectionLabel = textValue(getPath(root, ["header", "text"]));
+  const isRecommendationCard =
+    Boolean(getPath(record, ["content", "feedDiscoveryEntityComponent"])) &&
+    !actorName &&
+    !text &&
+    !isRecord(root.socialDetail);
+
+  const publishedAt = firstDefined(
+    toIsoDate(firstDefined(record.publishedAt, record.createdAt, record.lastModifiedAt)),
+    textValue(getPath(record, ["header", "text"])),
+    textValue(getPath(root, ["header", "text"])),
+    textValue(getPath(actorComponent, ["subtitle"])),
+  );
+
+  const id = getUrnId(
+    firstDefined(
+      textValue(record.entityUrn),
+      textValue(getPath(record, ["updateMetadata", "entityUrn"])),
+      textValue(root.entityUrn),
+    ),
+  );
+
+  if (!id && !actorName && !text) {
+    return null;
+  }
+
+  if (isRecommendationCard || sectionLabel?.toLowerCase().includes("recommended for you")) {
+    return null;
+  }
+
   return {
-    id: getUrnId(firstDefined(textValue(record.entityUrn), textValue(getPath(record, ["updateMetadata", "entityUrn"])))),
+    id,
     actorName,
     actorUrl,
     text,
-    publishedAt: toIsoDate(firstDefined(record.publishedAt, record.createdAt, record.lastModifiedAt)),
+    publishedAt,
     likes: numberValue(firstDefined(counts.numLikes, counts.likesCount)),
     comments: numberValue(firstDefined(counts.numComments, commentsState.totalComments, commentsState.totalFirstLevelComments)),
     reposts: numberValue(firstDefined(counts.numShares, counts.numReposts)),
@@ -484,8 +683,22 @@ export class VoyagerApi {
   }
 
   async getViewerProfile(): Promise<ProfileSummary> {
-    const data = await this.client.getJson<unknown>("/identity/profiles/me/profileView");
-    return parseProfile(data);
+    const profileUrn = await this.getViewerProfileUrn();
+    const [profileData, connections] = await Promise.all([
+      this.client.getJson<unknown>(`/identity/dash/profiles/${profileUrn}`, {
+        params: {
+          decorationId: FULL_PROFILE_DECORATION_ID,
+        },
+      }),
+      this.getConnectionsCount().catch(() => undefined),
+    ]);
+
+    const profile = parseProfile(profileData);
+    if (profile.connections === undefined && connections !== undefined) {
+      profile.connections = connections;
+    }
+
+    return profile;
   }
 
   async getProfile(identifier?: string): Promise<ProfileSummary> {
@@ -493,8 +706,23 @@ export class VoyagerApi {
       return this.getViewerProfile();
     }
 
-    const data = await this.client.getJson<unknown>(`/identity/profiles/${identifier}/profileView`);
-    return parseProfile(data);
+    const viewerStatus = await this.getStatus();
+    const normalized = parseLinkedInProfileIdentifier(identifier);
+
+    if (normalized === viewerStatus.publicIdentifier || normalized === viewerStatus.memberId) {
+      return this.getViewerProfile();
+    }
+
+    if (normalized.startsWith("urn:li:fsd_profile:")) {
+      const data = await this.client.getJson<unknown>(`/identity/dash/profiles/${normalized}`, {
+        params: {
+          decorationId: FULL_PROFILE_DECORATION_ID,
+        },
+      });
+      return parseProfile(data);
+    }
+
+    return this.scrapePublicProfile(normalized);
   }
 
   async getConnections(options: {
@@ -502,33 +730,22 @@ export class VoyagerApi {
     search?: string;
     recent?: boolean;
   }): Promise<PaginatedResult<ConnectionSummary>> {
-    const filters = ["resultType->PEOPLE", "network->F"];
-    const viewerStatus = await this.getStatus();
-
-    if (viewerStatus.memberId) {
-      filters.push(`connectionOf->${viewerStatus.memberId}`);
-    }
-
     const keywords = options.search?.trim();
     const paged = await paginate({
       limit: options.limit,
       pageSize: Math.min(options.limit, 25),
       fetchPage: async (start, count) => {
-        const data = await this.client.getJson<unknown>("/search/blended", {
-          headers: {
-            accept: SEARCH_ACCEPT,
-          },
-          params: {
-            count,
-            filters: `List(${filters.join(",")})`,
-            keywords: keywords || undefined,
-            origin: "GLOBAL_SEARCH_HEADER",
-            q: "all",
-            queryContext:
-              "List(spellCorrectionEnabled->true,relatedSearchesEnabled->true,kcardTypes->PROFILE|COMPANY|JOB|CONTENT)",
-            start,
-          },
+        const variables = this.buildSearchVariables({
+          count,
+          keywords,
+          network: "F",
+          origin: keywords ? "OTHER" : "FACETED_SEARCH",
+          start,
+          vertical: "people",
         });
+        const data = await this.client.getJson<unknown>(
+          `/graphql?includeWebMetadata=true&variables=${variables}&queryId=${SEARCH_CLUSTERS_QUERY_ID}`,
+        );
 
         let items = extractElements(data).map(parseConnection).filter((item): item is ConnectionSummary => Boolean(item));
 
@@ -565,16 +782,11 @@ export class VoyagerApi {
       pageSize,
       fetchPage: async (start, count) => {
         if (options.mine) {
-          const profile = await this.getViewerProfile();
-          const data = await this.client.getJson<unknown>("/feed/updates", {
-            params: {
-              count,
-              moduleKey: "member-share",
-              profileId: profile.publicIdentifier ?? profile.id ?? "me",
-              q: "memberShareFeed",
-              start,
-            },
-          });
+          const profileUrn = await this.getViewerProfileUrn();
+          const variables = `(count:${count},start:${start},profileUrn:${encodeURIComponent(profileUrn)})`;
+          const data = await this.client.getJson<unknown>(
+            `/graphql?includeWebMetadata=true&variables=${variables}&queryId=${PROFILE_UPDATES_QUERY_ID}`,
+          );
 
           const items = extractElements(data).map(parseFeedItem).filter((item): item is FeedItemSummary => Boolean(item));
           return {
@@ -584,36 +796,18 @@ export class VoyagerApi {
           };
         }
 
-        const attempts: Array<Record<string, string | number>> = [
-          {
-            count,
-            moduleKey: "member-share",
-            q: "networkShares",
-            start,
-          },
-          {
-            count,
-            moduleKey: "member-share-feed:phone",
-            q: "networkShares",
-            start,
-          },
-          {
-            count,
-            moduleKey: "member-share",
-            start,
-          },
-        ];
+        const variables = `(start:${start},count:${count},sortOrder:MEMBER_SETTING)`;
+        const data = await this.client.getJson<unknown>(
+          `/graphql?includeWebMetadata=true&variables=${variables}&queryId=${MAIN_FEED_QUERY_ID}`,
+        );
 
-        for (const params of attempts) {
-          const data = await this.client.getJson<unknown>("/feed/updates", { params });
-          const items = extractElements(data).map(parseFeedItem).filter((item): item is FeedItemSummary => Boolean(item));
-          if (items.length > 0) {
-            return {
-              items,
-              total: extractTotal(data),
-              nextStart: start + items.length,
-            };
-          }
+        const items = extractElements(data).map(parseFeedItem).filter((item): item is FeedItemSummary => Boolean(item));
+        if (items.length > 0) {
+          return {
+            items,
+            total: extractTotal(data),
+            nextStart: start + items.length,
+          };
         }
 
         return {
@@ -673,12 +867,7 @@ export class VoyagerApi {
     limit: number;
     unread?: boolean;
   }): Promise<PaginatedResult<NotificationSummary>> {
-    const data = await this.client.getJson<unknown>("/notifications", {
-      params: {
-        count: options.limit,
-        start: 0,
-      },
-    });
+    const data = await this.client.getJson<unknown>("/relationships/myNetworkNotifications");
 
     let items = extractElements(data).map(parseNotification).filter((item): item is NotificationSummary => Boolean(item));
 
@@ -726,43 +915,28 @@ export class VoyagerApi {
   }
 
   async getSuggestions(limit: number): Promise<PaginatedResult<NetworkSuggestionSummary>> {
-    const data = await this.client.getJson<unknown>("/relationships/dash/pymkCards", {
-      params: {
-        count: limit,
-        q: "peopleYouMayKnow",
-        start: 0,
-      },
-    });
-
-    const items = extractElements(data).map(parseSuggestion).filter((item): item is NetworkSuggestionSummary => Boolean(item));
-
-    return {
-      items,
-      start: 0,
-      count: items.length,
-      total: extractTotal(data) ?? items.length,
-      nextStart: undefined,
-    };
+    return this.scrapeSuggestions(limit);
   }
 
   async search(vertical: SearchVertical, keywords: string, limit: number): Promise<PaginatedResult<SearchResultSummary>> {
-    const filters = [`resultType->${this.resultTypeForVertical(vertical)}`];
+    if (vertical === "jobs") {
+      return this.scrapeJobSearch(keywords, limit);
+    }
 
-    const data = await this.client.getJson<unknown>("/search/blended", {
-      headers: {
-        accept: SEARCH_ACCEPT,
-      },
-      params: {
-        count: limit,
-        filters: `List(${filters.join(",")})`,
-        keywords,
-        origin: "GLOBAL_SEARCH_HEADER",
-        q: "all",
-        queryContext:
-          "List(spellCorrectionEnabled->true,relatedSearchesEnabled->true,kcardTypes->PROFILE|COMPANY|JOB|CONTENT)",
-        start: 0,
-      },
+    if (vertical === "posts") {
+      return this.scrapePostSearch(keywords, limit);
+    }
+
+    const variables = this.buildSearchVariables({
+      count: limit,
+      keywords,
+      origin: "OTHER",
+      start: 0,
+      vertical,
     });
+    const data = await this.client.getJson<unknown>(
+      `/graphql?includeWebMetadata=true&variables=${variables}&queryId=${SEARCH_CLUSTERS_QUERY_ID}`,
+    );
 
     const items = extractElements(data)
       .map((item) => parseSearchResult(vertical, item))
@@ -830,5 +1004,326 @@ export class VoyagerApi {
       default:
         return "PEOPLE";
     }
+  }
+
+  private async getViewerProfileUrn(): Promise<string> {
+    const status = await this.getStatus();
+    if (!status.memberId) {
+      throw new Error("Could not determine the current member profile urn.");
+    }
+
+    return `urn:li:fsd_profile:${status.memberId}`;
+  }
+
+  private async getConnectionsCount(): Promise<number | undefined> {
+    const data = await this.client.getJson<unknown>("/relationships/connectionsSummary");
+    return numberValue(getPath(data, ["numConnections"]));
+  }
+
+  private buildSearchVariables(options: {
+    count: number;
+    keywords?: string;
+    network?: string;
+    origin: string;
+    start: number;
+    vertical: SearchVertical;
+  }): string {
+    const queryParameters = [
+      ...(options.network ? [`(key:network,value:List(${options.network}))`] : []),
+      `(key:resultType,value:List(${this.resultTypeForVertical(options.vertical)}))`,
+    ];
+    const keywordSegment = options.keywords ? `keywords:${options.keywords},` : "";
+
+    return `(start:${options.start},origin:${options.origin},query:(${keywordSegment}flagshipSearchIntent:SEARCH_SRP,queryParameters:List(${queryParameters.join(",")}),includeFiltersInResponse:false))`;
+  }
+
+  private async scrapePublicProfile(identifier: string): Promise<ProfileSummary> {
+    const page = await this.client.openPage(buildProfileUrl(identifier) ?? `https://www.linkedin.com/in/${identifier}/`);
+    await page.waitForTimeout(2500);
+
+    const scraped = await page.evaluate(() => {
+      const main = document.querySelector("main");
+      const heroSection = main?.querySelector("section") ?? main;
+      const lines = (heroSection?.innerText ?? main?.innerText ?? "")
+        .split("\n")
+        .map((line: string) => line.replace(/\s+/g, " ").trim())
+        .filter((line: string) => line && line !== "·");
+      const headline = lines[1];
+      const location = lines.find(
+        (line: string, index: number) => index > 0 && line !== headline && !/followers?/i.test(line) && !/^contact info$/i.test(line),
+      );
+      const followerLine = lines.find((line: string) => /followers?/i.test(line));
+      const aboutSection = Array.from(main?.querySelectorAll("section") ?? []).find((section) => {
+        const heading = section.querySelector("h2, h3")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+        return /^about$/i.test(heading);
+      });
+      const summaryLines = (aboutSection?.innerText ?? "")
+        .split("\n")
+        .map((line: string) => line.replace(/\s+/g, " ").trim())
+        .filter(
+          (line: string) =>
+            line &&
+            !/^about$/i.test(line) &&
+            !/^(show all details|show more|show less|follow|connect|message)$/i.test(line) &&
+            !/^(accessibility|talent solutions|community guidelines|careers|marketing solutions|privacy & terms|ad choices|advertising|sales solutions|mobile|small business|safety center|questions\?|visit our help center\.|manage your account and privacy|go to your settings\.|recommendation transparency|learn more about recommended content\.|select language)$/i.test(
+              line,
+            ),
+        );
+      const summary = summaryLines.find((line: string) => line.length >= 30);
+
+      return {
+        fullName: main?.querySelector("h1")?.textContent?.trim() ?? lines[0] ?? "Unknown member",
+        headline,
+        location,
+        summary,
+        followers: followerLine,
+        profileUrl: window.location.href,
+      };
+    });
+
+    const publicIdentifier = extractPublicIdentifier(scraped.profileUrl);
+
+    return {
+      publicIdentifier,
+      fullName: scraped.fullName,
+      headline: scraped.headline,
+      location: scraped.location,
+      summary: scraped.summary,
+      followers: numberValue(scraped.followers),
+      profileUrl: buildProfileUrl(publicIdentifier) ?? scraped.profileUrl,
+    };
+  }
+
+  private async scrapeSuggestions(limit: number): Promise<PaginatedResult<NetworkSuggestionSummary>> {
+    const page = await this.client.openPage("https://www.linkedin.com/mynetwork/grow/");
+    await page.waitForTimeout(2500);
+
+    const items = await page.evaluate((maxItems) => {
+      const seen = new Set<string>();
+      const results: Array<{ fullName?: string; headline?: string; profileUrl?: string }> = [];
+      const anchors = Array.from(document.querySelectorAll('a[href*="/in/"]')) as HTMLAnchorElement[];
+
+      for (const anchor of anchors) {
+        const profileUrl = anchor.href.split("?")[0];
+        if (seen.has(profileUrl)) {
+          continue;
+        }
+
+        let container: HTMLElement | null = anchor;
+
+        for (let depth = 0; depth < 6 && container?.parentElement; depth += 1) {
+          const candidate: HTMLElement | null = container.parentElement;
+          const text = candidate?.innerText ?? "";
+          if (/(^|\n)(Follow|Connect)(\n|$)/i.test(text)) {
+            container = candidate;
+            break;
+          }
+
+          container = candidate;
+        }
+
+        const lines = (container?.innerText ?? anchor.innerText ?? "")
+          .split("\n")
+          .map((line: string) => line.replace(/\s+/g, " ").trim())
+          .filter(Boolean);
+
+        if (!lines.some((line: string) => /^(follow|connect)$/i.test(line))) {
+          continue;
+        }
+
+        const fullName = lines[0]?.replace(/,\s*(Premium|Verified)$/i, "").trim();
+        const headline = lines.find(
+          (line: string, index: number) =>
+            index > 0 &&
+            line !== fullName &&
+            !/^(follow|connect|premium|verified|show all|load more)$/i.test(line) &&
+            !/followers?/i.test(line) &&
+            !/^\d+$/.test(line),
+        );
+
+        seen.add(profileUrl);
+        results.push({
+          fullName,
+          headline,
+          profileUrl,
+        });
+
+        if (results.length >= maxItems) {
+          break;
+        }
+      }
+
+      return results;
+    }, limit);
+
+    const parsedItems = items
+      .map((item) => ({
+        id: extractPublicIdentifier(item.profileUrl),
+        fullName: item.fullName,
+        headline: item.headline,
+        profileUrl: item.profileUrl,
+      }))
+      .filter((item) => Boolean(item.fullName));
+
+    return {
+      items: parsedItems,
+      start: 0,
+      count: parsedItems.length,
+      total: parsedItems.length,
+      nextStart: undefined,
+    };
+  }
+
+  private async scrapeJobSearch(keywords: string, limit: number): Promise<PaginatedResult<SearchResultSummary>> {
+    const page = await this.client.openPage(`https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(keywords)}`);
+    await page.waitForTimeout(3000);
+
+    const items = await page.evaluate((maxItems) => {
+      const seen = new Set<string>();
+      const results: Array<{ title?: string; subtitle?: string; location?: string; url?: string }> = [];
+      const links = Array.from(document.querySelectorAll('a[href*="/jobs/view/"]')) as HTMLAnchorElement[];
+
+      for (const link of links) {
+        const url = link.href;
+        if (seen.has(url)) {
+          continue;
+        }
+
+        const card = link.closest(".job-card-container") ?? link.closest("div");
+        const lines = (card?.textContent ?? link.textContent ?? "")
+          .split("\n")
+          .map((line: string) => line.replace(/\s+/g, " ").trim())
+          .filter(Boolean);
+
+        const cleaned = lines
+          .map((line: string) => line.replace(/\s+with verification$/i, "").trim())
+          .filter((line: string, index: number, all: string[]) => all.indexOf(line) === index);
+
+        const title = cleaned[0];
+        const subtitle = cleaned.find(
+          (line: string, index: number) => index > 0 && !/^(viewed|promoted|easy apply)$/i.test(line) && !/with verification$/i.test(line) && line !== title,
+        );
+        const location = cleaned.find(
+          (line: string, index: number) => index > 0 && line !== title && line !== subtitle && /\b[A-Z][a-z]+/.test(line),
+        );
+
+        seen.add(url);
+        results.push({ title, subtitle, location, url });
+
+        if (results.length >= maxItems) {
+          break;
+        }
+      }
+
+      return results;
+    }, limit);
+
+    return {
+      items: items
+        .map((item) => ({
+          id: getUrnId(item.url),
+          type: "jobs" as const,
+          title: stripVerificationSuffix(item.title) ?? "Job",
+          subtitle: item.subtitle,
+          location: item.location,
+          url: item.url,
+        }))
+        .filter((item) => item.title),
+      start: 0,
+      count: items.length,
+      total: items.length,
+      nextStart: undefined,
+    };
+  }
+
+  private async scrapePostSearch(keywords: string, limit: number): Promise<PaginatedResult<SearchResultSummary>> {
+    const page = await this.client.openPage(`https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(keywords)}`);
+    await page.waitForTimeout(3000);
+
+    const items = await page.evaluate((maxItems) => {
+      const isActionLine = (value: string) =>
+        ["follow", "connect", "message", "show all", "show more", "view job", "like", "comment", "repost", "send", "save", "apply"].includes(
+          value.toLowerCase(),
+        );
+      const isSearchPostsStopLine = (value: string) =>
+        isActionLine(value) ||
+        /\b\d+\s+(likes?|comments?|reposts?|followers?)\b/i.test(value) ||
+        /visible to anyone on or off linkedin/i.test(value);
+      const seen = new Set<string>();
+      const results: Array<{ title?: string; subtitle?: string; snippet?: string; url?: string }> = [];
+      const cards = Array.from(document.querySelectorAll(".fie-impression-container")) as HTMLElement[];
+
+      for (const card of cards) {
+        const lines = card.innerText
+          .split("\n")
+          .map((line: string) => line.replace(/\s+/g, " ").trim())
+          .filter(Boolean)
+          .filter((line: string, index: number, all: string[]) => all.indexOf(line) === index);
+
+        if (lines.length < 5 || !lines.some((line: string) => /^(follow|connect)$/i.test(line))) {
+          continue;
+        }
+
+        const anchors = Array.from(card.querySelectorAll("a[href]")) as HTMLAnchorElement[];
+        const url = anchors.find((anchor) => /\/(pulse|jobs\/view|in|company)\//.test(anchor.href) && !/\/help\//.test(anchor.href))?.href;
+
+        if (!url || seen.has(url)) {
+          continue;
+        }
+
+        const title = lines.find(
+          (line: string) =>
+            !/^(feed post|follow|connect|message|premium|verified)$/i.test(line) &&
+            !/^\d+\s*(hours?|days?|weeks?|months?)\s+ago/i.test(line) &&
+            !/^visible to anyone on or off linkedin$/i.test(line),
+        );
+        const subtitle = lines.find(
+          (line: string, index: number) =>
+            index > 0 &&
+            line !== title &&
+            !/^(follow|connect|message)$/i.test(line) &&
+            !/^\d+[hmwdy]/i.test(line) &&
+            !/^visible to anyone on or off linkedin$/i.test(line),
+        );
+        const followIndex = lines.findIndex((line: string) => /^(follow|connect)$/i.test(line));
+        const snippetLines = (followIndex >= 0 ? lines.slice(followIndex + 1) : lines.slice(2)).filter(
+          (line: string) => !isSearchPostsStopLine(line) && line !== title && line !== subtitle && line !== "…more",
+        );
+        const snippet = snippetLines.join(" ").trim();
+
+        seen.add(url);
+        results.push({
+          title,
+          subtitle,
+          snippet,
+          url,
+        });
+
+        if (results.length >= maxItems) {
+          break;
+        }
+      }
+
+      return results;
+    }, limit);
+
+    const parsedItems = items
+      .map((item) => ({
+        id: extractPublicIdentifier(item.url) ?? getUrnId(item.url),
+        type: "posts" as const,
+        title: item.title ?? "Post",
+        subtitle: item.subtitle,
+        url: item.url,
+        snippet: item.snippet,
+      }))
+      .filter((item) => item.title);
+
+    return {
+      items: parsedItems,
+      start: 0,
+      count: parsedItems.length,
+      total: parsedItems.length,
+      nextStart: undefined,
+    };
   }
 }

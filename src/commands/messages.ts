@@ -14,29 +14,32 @@ export function registerMessagesCommand(program: Command): void {
     .option("--search <query>", "Search recent messages")
     .action((options, command) =>
       runCommand(async () => {
-        const { context, api } = await getApiForCommand(command);
-        const result = await api.getMessages({
-          limit: withDefaultLimit(context.limit, 15),
-          unread: Boolean(options.unread),
-          search: options.search,
-        });
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.getMessages({
+            limit: withDefaultLimit(context.limit, 15),
+            unread: Boolean(options.unread),
+            search: options.search,
+          });
 
-        if (context.json) {
-          printJson(result);
-          return;
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          printTable(
+            ["Title", "Participants", "Unread", "Updated", "Snippet"],
+            result.items.map((message) => [
+              message.title,
+              message.participants.join(", "),
+              message.unread ? "yes" : "no",
+              message.updatedAt,
+              message.snippet,
+            ]),
+          );
+        } finally {
+          await close();
         }
-
-        printTable(
-          ["Title", "Participants", "Unread", "Updated", "Snippet"],
-          result.items.map((message) => [
-            message.title,
-            message.participants.join(", "),
-            message.unread ? "yes" : "no",
-            message.updatedAt,
-            message.snippet,
-          ]),
-        );
       }),
     );
 }
-

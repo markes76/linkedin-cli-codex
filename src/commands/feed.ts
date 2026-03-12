@@ -14,25 +14,29 @@ export function registerFeedCommand(program: Command): void {
     .option("--stats", "Include engagement stats for your posts")
     .action((options, command) =>
       runCommand(async () => {
-        const { context, api } = await getApiForCommand(command);
-        const result = await api.getFeed({
-          limit: withDefaultLimit(context.limit, 10),
-          mine: Boolean(options.mine),
-        });
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.getFeed({
+            limit: withDefaultLimit(context.limit, 10),
+            mine: Boolean(options.mine),
+          });
 
-        if (context.json) {
-          printJson(result);
-          return;
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          const headers = options.stats ? ["Actor", "Published", "Text", "Likes", "Comments", "Reposts"] : ["Actor", "Published", "Text"];
+          const rows = result.items.map((item) =>
+            options.stats
+              ? [item.actorName, item.publishedAt, item.text, item.likes, item.comments, item.reposts]
+              : [item.actorName, item.publishedAt, item.text],
+          );
+
+          printTable(headers, rows);
+        } finally {
+          await close();
         }
-
-        const headers = options.stats ? ["Actor", "Published", "Text", "Likes", "Comments", "Reposts"] : ["Actor", "Published", "Text"];
-        const rows = result.items.map((item) =>
-          options.stats
-            ? [item.actorName, item.publishedAt, item.text, item.likes, item.comments, item.reposts]
-            : [item.actorName, item.publishedAt, item.text],
-        );
-
-        printTable(headers, rows);
       }),
     );
 
@@ -41,27 +45,30 @@ export function registerFeedCommand(program: Command): void {
     .description("Get analytics for a specific post URL")
     .action((postUrl, _options, command) =>
       runCommand(async () => {
-        const { context, api } = await getApiForCommand(command);
-        const post = await api.getAnalyticsForPost(postUrl, withDefaultLimit(context.limit, 50));
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const post = await api.getAnalyticsForPost(postUrl, withDefaultLimit(context.limit, 50));
 
-        if (!post) {
-          throw new CliError("Could not match that post URL to one of your recent posts. Try increasing `--limit`.");
+          if (!post) {
+            throw new CliError("Could not match that post URL to one of your recent posts. Try increasing `--limit`.");
+          }
+
+          if (context.json) {
+            printJson(post);
+            return;
+          }
+
+          printKeyValue([
+            ["Actor", post.actorName],
+            ["Published", post.publishedAt],
+            ["Text", post.text],
+            ["Likes", post.likes],
+            ["Comments", post.comments],
+            ["Reposts", post.reposts],
+          ]);
+        } finally {
+          await close();
         }
-
-        if (context.json) {
-          printJson(post);
-          return;
-        }
-
-        printKeyValue([
-          ["Actor", post.actorName],
-          ["Published", post.publishedAt],
-          ["Text", post.text],
-          ["Likes", post.likes],
-          ["Comments", post.comments],
-          ["Reposts", post.reposts],
-        ]);
       }),
     );
 }
-

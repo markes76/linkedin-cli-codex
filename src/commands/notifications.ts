@@ -13,26 +13,29 @@ export function registerNotificationsCommand(program: Command): void {
     .option("--unread", "Show unread notifications only")
     .action((options, command) =>
       runCommand(async () => {
-        const { context, api } = await getApiForCommand(command);
-        const result = await api.getNotifications({
-          limit: withDefaultLimit(context.limit, 15),
-          unread: Boolean(options.unread),
-        });
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.getNotifications({
+            limit: withDefaultLimit(context.limit, 15),
+            unread: Boolean(options.unread),
+          });
 
-        if (context.json) {
-          printJson(result);
-          return;
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          printTable(
+            ["Notification", "Unread", "Occurred"],
+            result.items.map((notification) => [
+              notification.text,
+              notification.unread ? "yes" : "no",
+              notification.occurredAt,
+            ]),
+          );
+        } finally {
+          await close();
         }
-
-        printTable(
-          ["Notification", "Unread", "Occurred"],
-          result.items.map((notification) => [
-            notification.text,
-            notification.unread ? "yes" : "no",
-            notification.occurredAt,
-          ]),
-        );
       }),
     );
 }
-

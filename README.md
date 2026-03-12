@@ -15,6 +15,7 @@ Unofficial LinkedIn CLI for agentic coding tools like Claude Code, Cursor, Codex
 
 - Manual LinkedIn login through a real Chrome window controlled by Playwright
 - Secure local session storage in `~/.config/linkedin-cli/session.json`
+- Browser-backed Voyager requests that reuse the saved LinkedIn Chrome profile for better auth fidelity
 - Read-only profile, connections, feed, messaging, notification, network, analytics, search, and job commands
 - Pretty terminal output with JSON mode for agents and scripts
 - Claude Code skill install, uninstall, status, and show commands
@@ -68,6 +69,12 @@ The CLI stores LinkedIn session cookies in:
 ~/.config/linkedin-cli/session.json
 ```
 
+It also maintains a dedicated Playwright Chrome profile in:
+
+```text
+~/.config/linkedin-cli/browser-profile/
+```
+
 The file is written with `0600` permissions.
 
 ### Log in
@@ -77,6 +84,8 @@ linkedin login
 ```
 
 This opens a headed Chrome window with a persistent browser profile. Sign in manually, complete MFA if needed, and the CLI will save `li_at` and `JSESSIONID` automatically.
+
+After login, read commands prefer a browser-backed Playwright transport that reuses the saved browser profile and full cookie jar. This is a deliberate deviation from the lighter cookie-replay model because it has proven more reliable against LinkedIn’s undocumented auth behavior.
 
 ### Check status
 
@@ -90,6 +99,8 @@ linkedin status --json
 ```bash
 linkedin logout
 ```
+
+This clears both the saved session file and the CLI-only Playwright browser profile.
 
 ## Commands
 
@@ -224,6 +235,7 @@ Add `linkedin` or `linkedin-cli` as an allowed terminal tool and prefer the `--j
 - Voyager endpoints are undocumented. Some commands are best-effort and may need endpoint refreshes over time.
 - `profile`, `connections`, `feed`, and `search` are the primary working flows in this scaffold.
 - `jobs saved`, `jobs applied`, and `jobs recommended` are registered and ready for future endpoint wiring, but currently return empty scaffold data.
+- If you need to troubleshoot transport behavior, set `LINKEDIN_CLI_TRANSPORT=http` to force raw cookie replay or `LINKEDIN_CLI_BROWSER_HEADFUL=1` to run browser-backed reads in a visible Chrome window.
 
 ## Contributing
 

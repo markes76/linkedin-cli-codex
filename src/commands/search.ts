@@ -13,18 +13,22 @@ function registerSearchVertical(search: Command, vertical: SearchVertical, descr
     .description(description)
     .action((query, _options, command) =>
       runCommand(async () => {
-        const { context, api } = await getApiForCommand(command);
-        const result = await api.search(vertical, query, withDefaultLimit(context.limit, 10));
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.search(vertical, query, withDefaultLimit(context.limit, 10));
 
-        if (context.json) {
-          printJson(result);
-          return;
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          printTable(
+            ["Title", "Subtitle", "Location", "URL"],
+            result.items.map((item) => [item.title, item.subtitle, item.location, item.url]),
+          );
+        } finally {
+          await close();
         }
-
-        printTable(
-          ["Title", "Subtitle", "Location", "URL"],
-          result.items.map((item) => [item.title, item.subtitle, item.location, item.url]),
-        );
       }),
     );
 }
@@ -37,4 +41,3 @@ export function registerSearchCommand(program: Command): void {
   registerSearchVertical(search, "jobs", "Search LinkedIn jobs");
   registerSearchVertical(search, "posts", "Search LinkedIn posts");
 }
-

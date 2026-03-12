@@ -14,77 +14,80 @@ export function registerAnalyticsCommand(program: Command): void {
     .option("--followers", "Show follower and audience snapshot data")
     .action((options, command) =>
       runCommand(async () => {
-        const { context, api } = await getApiForCommand(command);
-        const limit = withDefaultLimit(context.limit, 30);
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const limit = withDefaultLimit(context.limit, 30);
 
-        if (options.post) {
-          const post = await api.getAnalyticsForPost(options.post, Math.max(limit, 50));
-          if (!post) {
-            throw new CliError("Could not locate that post in your recent posts. Try a larger `--limit`.");
+          if (options.post) {
+            const post = await api.getAnalyticsForPost(options.post, Math.max(limit, 50));
+            if (!post) {
+              throw new CliError("Could not locate that post in your recent posts. Try a larger `--limit`.");
+            }
+
+            if (context.json) {
+              printJson(post);
+              return;
+            }
+
+            printKeyValue([
+              ["Actor", post.actorName],
+              ["Published", post.publishedAt],
+              ["Text", post.text],
+              ["Likes", post.likes],
+              ["Comments", post.comments],
+              ["Reposts", post.reposts],
+            ]);
+            return;
           }
 
+          if (options.followers) {
+            const snapshot = await api.getFollowerSnapshot();
+            if (context.json) {
+              printJson(snapshot);
+              return;
+            }
+
+            printKeyValue([
+              ["Full name", snapshot.fullName],
+              ["Headline", snapshot.headline],
+              ["Followers", snapshot.followers],
+              ["Connections", snapshot.connections],
+              ["Location", snapshot.location],
+            ]);
+            console.log("Demographic breakdowns are not exposed by this scaffold yet.");
+            return;
+          }
+
+          const analytics = await api.getAnalytics(limit);
           if (context.json) {
-            printJson(post);
+            printJson(analytics);
             return;
           }
 
           printKeyValue([
-            ["Actor", post.actorName],
-            ["Published", post.publishedAt],
-            ["Text", post.text],
-            ["Likes", post.likes],
-            ["Comments", post.comments],
-            ["Reposts", post.reposts],
+            ["Window", analytics.window],
+            ["Posts analyzed", analytics.postsAnalyzed],
+            ["Total likes", analytics.totalLikes],
+            ["Total comments", analytics.totalComments],
+            ["Total reposts", analytics.totalReposts],
           ]);
-          return;
-        }
 
-        if (options.followers) {
-          const snapshot = await api.getFollowerSnapshot();
-          if (context.json) {
-            printJson(snapshot);
-            return;
+          if (analytics.topPosts.length) {
+            console.log("");
+            printTable(
+              ["Published", "Text", "Likes", "Comments", "Reposts"],
+              analytics.topPosts.map((post) => [
+                post.publishedAt,
+                post.text,
+                post.likes,
+                post.comments,
+                post.reposts,
+              ]),
+            );
           }
-
-          printKeyValue([
-            ["Full name", snapshot.fullName],
-            ["Headline", snapshot.headline],
-            ["Followers", snapshot.followers],
-            ["Connections", snapshot.connections],
-            ["Location", snapshot.location],
-          ]);
-          console.log("Demographic breakdowns are not exposed by this scaffold yet.");
-          return;
-        }
-
-        const analytics = await api.getAnalytics(limit);
-        if (context.json) {
-          printJson(analytics);
-          return;
-        }
-
-        printKeyValue([
-          ["Window", analytics.window],
-          ["Posts analyzed", analytics.postsAnalyzed],
-          ["Total likes", analytics.totalLikes],
-          ["Total comments", analytics.totalComments],
-          ["Total reposts", analytics.totalReposts],
-        ]);
-
-        if (analytics.topPosts.length) {
-          console.log("");
-          printTable(
-            ["Published", "Text", "Likes", "Comments", "Reposts"],
-            analytics.topPosts.map((post) => [
-              post.publishedAt,
-              post.text,
-              post.likes,
-              post.comments,
-              post.reposts,
-            ]),
-          );
+        } finally {
+          await close();
         }
       }),
     );
 }
-

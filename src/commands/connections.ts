@@ -15,42 +15,45 @@ export function registerConnectionsCommand(program: Command): void {
     .option("--recent", "Show the most recent connections first")
     .action((options, command) =>
       runCommand(async () => {
-        const { context, api } = await getApiForCommand(command);
-        const result = await api.getConnections({
-          limit: withDefaultLimit(context.limit, options.count ? 1 : 25),
-          recent: Boolean(options.recent),
-          search: options.search,
-        });
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.getConnections({
+            limit: withDefaultLimit(context.limit, options.count ? 1 : 25),
+            recent: Boolean(options.recent),
+            search: options.search,
+          });
 
-        if (options.count) {
-          const payload = {
-            count: result.total ?? result.items.length,
-          };
+          if (options.count) {
+            const payload = {
+              count: result.total ?? result.items.length,
+            };
 
-          if (context.json) {
-            printJson(payload);
+            if (context.json) {
+              printJson(payload);
+              return;
+            }
+
+            printKeyValue([["Connections", payload.count]]);
             return;
           }
 
-          printKeyValue([["Connections", payload.count]]);
-          return;
-        }
+          if (context.json) {
+            printJson(result);
+            return;
+          }
 
-        if (context.json) {
-          printJson(result);
-          return;
+          printTable(
+            ["Name", "Headline", "Location", "Profile"],
+            result.items.map((connection) => [
+              connection.fullName,
+              connection.headline,
+              connection.location,
+              connection.profileUrl,
+            ]),
+          );
+        } finally {
+          await close();
         }
-
-        printTable(
-          ["Name", "Headline", "Location", "Profile"],
-          result.items.map((connection) => [
-            connection.fullName,
-            connection.headline,
-            connection.location,
-            connection.profileUrl,
-          ]),
-        );
       }),
     );
 }
-

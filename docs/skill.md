@@ -8,6 +8,7 @@ Use `linkedin-cli` to read data from a logged-in LinkedIn account through the `l
 2. If a command fails with an authentication error, run `linkedin login` and ask the user to complete the browser sign-in flow.
 3. Treat this CLI as read-only. Do not assume it can safely mutate LinkedIn state.
 4. For list-style commands, add `--limit N` when you only need a small sample.
+5. The CLI prefers browser-backed requests using its saved Playwright Chrome profile, so auth state lives in both `session.json` and `~/.config/linkedin-cli/browser-profile/`.
 
 ## Authentication commands
 
@@ -211,4 +212,3 @@ Examples:
 - `--json` is for agents, scripts, and `jq`.
 - Counts may come from LinkedIn paging metadata when available, otherwise from the returned item count.
 - Some Voyager endpoints are undocumented and may change. If fields disappear or arrays are empty, retry with `linkedin status --json` first to confirm the session is still valid.
-
