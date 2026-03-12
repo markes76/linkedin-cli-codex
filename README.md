@@ -258,6 +258,7 @@ Tagged releases publish two downloadable artifacts:
 - `linkedin-skill.zip`
 
 This is the recommended GitHub-side distribution path for the skill instead of publishing it as a separate GitHub Package.
+If you also want the workflow to publish to npm, configure `NPM_TOKEN` in the repository secrets. Without it, the workflow now skips npm publish but still creates the GitHub release and uploads both assets.
 
 ### OpenClaw
 
@@ -287,6 +288,7 @@ Add `linkedin` or `linkedin-cli` as an allowed terminal tool and prefer the `--j
 - `profile --posts` is now the best route for "give me this person's recent posts," using their recent-activity page rather than generic content search.
 - `jobs saved` and `jobs applied` are wired to the LinkedIn jobs tracker and may return empty arrays on empty accounts.
 - `jobs recommended` remains a best-effort wrapper, not a dedicated LinkedIn recommendation endpoint.
+- CSV export currently exists through explicit command surfaces like `linkedin connections export --format csv`. The broader shared output layer from the roadmap, such as global `--csv`, `--md`, `--copy`, `--output`, and `--quiet`, is still pending.
 - If you need to troubleshoot transport behavior, set `LINKEDIN_CLI_TRANSPORT=http` to force raw cookie replay or `LINKEDIN_CLI_BROWSER_HEADFUL=1` to run browser-backed reads in a visible Chrome window.
 
 ## Contributing

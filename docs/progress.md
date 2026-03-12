@@ -20,6 +20,11 @@ Reusable skill:
 - `~/.codex/skills/cli-skill-builder/SKILL.md`
 - `~/.codex/skills/linkedin-cli-operator/SKILL.md`
 
+Release state:
+- `v0.1.1` exists on GitHub with uploaded release assets
+- the release workflow only failed on npm publish because `NPM_TOKEN` was not configured
+- package version has now been bumped to `0.1.2` and the release workflow has been updated to skip npm publish gracefully when no npm token is present
+
 ## Working Today
 
 ### Authentication
@@ -142,6 +147,12 @@ Build once and reuse across commands:
 - `--md`
 - `--copy`
 - `--quiet`
+
+Current output status:
+- pretty terminal tables are in place across the main human-facing commands
+- `--json` works broadly and is the agent-default path
+- CSV exists today through explicit command paths like `linkedin connections export --format csv`
+- the full shared output layer above is still not implemented globally
 
 ## Real Account Testing Recommendation
 
