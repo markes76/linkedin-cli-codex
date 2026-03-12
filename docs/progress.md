@@ -12,9 +12,12 @@ It records what has already been implemented, what has been verified, what is st
 The project is scaffolded, buildable, and published locally as a working package.
 
 Git status:
-- Latest pushed commit at time of writing: `fd9ce3a`
+- Latest pushed commit at time of writing: `3649e8b`
 - Branch: `main`
 - Remote: `origin` -> `https://github.com/markes76/linkedin-cli-codex.git`
+
+Reusable skill:
+- `~/.codex/skills/cli-skill-builder/SKILL.md`
 
 ## Working Today
 
