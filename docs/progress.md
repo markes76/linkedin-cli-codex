@@ -18,6 +18,7 @@ Git status:
 
 Reusable skill:
 - `~/.codex/skills/cli-skill-builder/SKILL.md`
+- `~/.codex/skills/linkedin-cli-operator/SKILL.md`
 
 ## Working Today
 
