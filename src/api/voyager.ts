@@ -3188,29 +3188,79 @@ export class VoyagerApi {
 
     const scraped = await page.evaluate(({ maxItems, label }) => {
       const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const pickText = (root: ParentNode, selectors: string[]) => {
+        for (const selector of selectors) {
+          const node = root.querySelector(selector);
+          const value = normalize(node?.textContent ?? "");
+          if (value) {
+            return value;
+          }
+        }
+        return undefined;
+      };
       const main = document.querySelector("main");
       const lines = (main?.innerText ?? "")
         .split("\n")
         .map(normalize)
         .filter(Boolean);
       const countLine = lines.find((line) => line.startsWith(`${label} ·`));
-      const cards = Array.from(document.querySelectorAll('a[href*="/jobs/view/"]')).slice(0, maxItems).map((anchor) => {
-        const link = anchor as HTMLAnchorElement;
-        const container = link.closest(".job-card-container, li, article, div");
-        const cardLines = (container?.textContent ?? link.textContent ?? "")
-          .split("\n")
-          .map(normalize)
-          .filter(Boolean)
-          .filter((line, index, all) => all.indexOf(line) === index);
-        return {
-          id: link.href.match(/\/jobs\/view\/(\d+)/)?.[1],
-          title: cardLines[0],
-          company: cardLines.find((line, index) => index > 0 && line !== cardLines[0]),
-          location: cardLines.find((line) => /\(|hybrid|remote|on-site|onsite/i.test(line)),
-          postedAt: cardLines.find((line) => /ago|posted/i.test(line)),
-          url: link.href.split("?")[0],
-        };
-      });
+      const seen = new Set<string>();
+      const cards = Array.from(document.querySelectorAll('a[href*="/jobs/view/"]'))
+        .map((anchor) => {
+          const link = anchor as HTMLAnchorElement;
+          const url = link.href.split("?")[0];
+          if (seen.has(url)) {
+            return undefined;
+          }
+          seen.add(url);
+
+          const container = link.closest(".job-card-container, li, article");
+          const root = container ?? link;
+          const cardLines = (root.textContent ?? link.textContent ?? "")
+            .split("\n")
+            .map(normalize)
+            .filter(Boolean)
+            .filter((line, index, all) => all.indexOf(line) === index);
+          const paragraphLines = Array.from(root.querySelectorAll("p"))
+            .map((node) => normalize(node.textContent ?? ""))
+            .filter(Boolean);
+          const title = paragraphLines[0] ?? pickText(root, [
+            ".job-card-list__title--link",
+            ".job-card-container__link",
+            ".artdeco-entity-lockup__title a",
+            'a[href*="/jobs/view/"]',
+          ]) ?? cardLines[0];
+          const subtitle = paragraphLines[1];
+          const [companyFromParagraph, locationFromParagraph] = subtitle?.split("·").map((part) => normalize(part)) ?? [];
+          const company = companyFromParagraph ?? pickText(root, [
+            ".artdeco-entity-lockup__subtitle span[aria-hidden='true']",
+            ".artdeco-entity-lockup__subtitle",
+            ".job-card-container__primary-description",
+          ]) ?? cardLines.find((line, index) => index > 0 && line !== title);
+          const metadata = Array.from(
+            root.querySelectorAll(
+              ".job-card-container__metadata-item, .job-card-container__metadata-wrapper li, .artdeco-entity-lockup__caption, .job-card-container__footer-item",
+            ),
+          )
+            .map((node) => normalize(node.textContent ?? ""))
+            .filter(Boolean);
+          const location =
+            locationFromParagraph ??
+            metadata.find((line) => !/ago|posted|reposted|applicants?|no longer accepting/i.test(line)) ??
+            cardLines.find((line) => line !== title && line !== company && !/ago|posted|reposted/i.test(line));
+          const postedAt = paragraphLines.slice(2).find((line) => /ago|posted|reposted/i.test(line)) ?? [...metadata, ...cardLines].find((line) => /ago|posted|reposted/i.test(line));
+
+          return {
+            id: link.href.match(/\/jobs\/view\/(\d+)/)?.[1],
+            title,
+            company,
+            location,
+            postedAt,
+            url,
+          };
+        })
+        .filter(Boolean)
+        .slice(0, maxItems);
 
       return {
         total: countLine ? Number.parseInt(countLine.replace(/[^\d]/g, ""), 10) : 0,

@@ -186,6 +186,20 @@ After that, do a narrow real-account smoke test:
 - `linkedin jobs saved --json`
 - `linkedin jobs applied --json`
 
+## Real Account Smoke Test
+
+Validated on the real account with a deliberately narrow pass:
+
+- `linkedin status --json`
+- `linkedin profile --deep --json`
+- `linkedin connections list --limit 10 --json`
+- `linkedin content stats --period 30d --json`
+- `linkedin jobs saved --json`
+
+Follow-up fix landed after the real-account pass:
+
+- `jobs saved` now parses tracker cards into real `title`, `company`, `location`, and `postedAt` fields instead of collapsing the whole card into one string
+
 ## Update Rule
 
 Whenever a meaningful milestone is completed:
