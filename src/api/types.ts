@@ -8,7 +8,11 @@ export interface SessionData {
 export interface CommandContext {
   json: boolean;
   color: boolean;
+  format: "table" | "json" | "csv" | "md" | "html";
   limit?: number;
+  output?: string;
+  copy: boolean;
+  quiet: boolean;
 }
 
 export interface ProfilePosition {

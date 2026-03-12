@@ -3,11 +3,11 @@ import type { Command } from "commander";
 import { VoyagerApi } from "../api/voyager.js";
 import { VoyagerClient } from "../api/client.js";
 import { readSession } from "../auth/session.js";
-import { printJson } from "../output/json.js";
 import { printKeyValue } from "../output/table.js";
 import { theme } from "../output/colors.js";
 import { getCommandContext } from "../utils/command.js";
 import { LinkedInAuthError, getErrorMessage, runCommand } from "../utils/errors.js";
+import { outputForCommand } from "./support.js";
 
 export function registerStatusCommand(program: Command): void {
   program
@@ -20,12 +20,11 @@ export function registerStatusCommand(program: Command): void {
 
         if (!session) {
           const payload = { authenticated: false, reason: "No saved session found." };
-          if (context.json) {
-            printJson(payload);
-            return;
-          }
-
-          console.log(theme.warning(payload.reason));
+          await outputForCommand(context, payload, {
+            title: "LinkedIn session status",
+            quietValue: payload.reason,
+            renderTable: () => console.log(theme.warning(payload.reason)),
+          });
           return;
         }
 
@@ -34,19 +33,18 @@ export function registerStatusCommand(program: Command): void {
           try {
             const api = new VoyagerApi(client);
             const status = await api.getStatus(session.savedAt);
-
-            if (context.json) {
-              printJson(status);
-              return;
-            }
-
-            printKeyValue([
-              ["Authenticated", status.authenticated ? "yes" : "no"],
-              ["Full name", status.fullName],
-              ["Public identifier", status.publicIdentifier],
-              ["Headline", status.headline],
-              ["Saved at", status.savedAt],
-            ]);
+            await outputForCommand(context, status, {
+              title: "LinkedIn session status",
+              quietValue: status.authenticated ? "authenticated" : "not authenticated",
+              renderTable: () =>
+                printKeyValue([
+                  ["Authenticated", status.authenticated ? "yes" : "no"],
+                  ["Full name", status.fullName],
+                  ["Public identifier", status.publicIdentifier],
+                  ["Headline", status.headline],
+                  ["Saved at", status.savedAt],
+                ]),
+            });
           } finally {
             await client.close();
           }
@@ -59,13 +57,11 @@ export function registerStatusCommand(program: Command): void {
             authenticated: false,
             reason: getErrorMessage(error),
           };
-
-          if (context.json) {
-            printJson(payload);
-            return;
-          }
-
-          console.log(theme.warning(payload.reason));
+          await outputForCommand(context, payload, {
+            title: "LinkedIn session status",
+            quietValue: payload.reason,
+            renderTable: () => console.log(theme.warning(payload.reason)),
+          });
         }
       }),
     );

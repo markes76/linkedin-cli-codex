@@ -1,10 +1,9 @@
 import type { Command } from "commander";
 
-import { printJson } from "../output/json.js";
 import { printKeyValue, printPostDetailSummary, printTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { CliError, runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 export function registerFeedCommand(program: Command): void {
   program
@@ -21,19 +20,20 @@ export function registerFeedCommand(program: Command): void {
             mine: Boolean(options.mine),
           });
 
-          if (context.json) {
-            printJson(result);
-            return;
-          }
+          await outputForCommand(context, result, {
+            title: options.mine ? "My LinkedIn feed posts" : "LinkedIn feed",
+            quietValue: result.count,
+            renderTable: () => {
+              const headers = options.stats ? ["Actor", "Published", "Text", "Likes", "Comments", "Reposts"] : ["Actor", "Published", "Text"];
+              const rows = result.items.map((item) =>
+                options.stats
+                  ? [item.actorName, item.publishedAt, item.text, item.likes, item.comments, item.reposts]
+                  : [item.actorName, item.publishedAt, item.text],
+              );
 
-          const headers = options.stats ? ["Actor", "Published", "Text", "Likes", "Comments", "Reposts"] : ["Actor", "Published", "Text"];
-          const rows = result.items.map((item) =>
-            options.stats
-              ? [item.actorName, item.publishedAt, item.text, item.likes, item.comments, item.reposts]
-              : [item.actorName, item.publishedAt, item.text],
-          );
-
-          printTable(headers, rows);
+              printTable(headers, rows);
+            },
+          });
         } finally {
           await close();
         }
@@ -59,12 +59,11 @@ export function registerFeedCommand(program: Command): void {
             throw new CliError("Could not match that post URL to one of your recent posts. Try increasing `--limit`.");
           }
 
-          if (context.json) {
-            printJson(post);
-            return;
-          }
-
-          printPostDetailSummary(post);
+          await outputForCommand(context, post, {
+            title: "LinkedIn post detail",
+            quietValue: post.id ?? post.actorName,
+            renderTable: () => printPostDetailSummary(post),
+          });
         } finally {
           await close();
         }

@@ -2,7 +2,6 @@ import type { Command } from "commander";
 
 import type { DeepProfileSummary } from "../api/types.js";
 import { parseLinkedInProfileIdentifier } from "../api/voyager.js";
-import { printJson } from "../output/json.js";
 import {
   printContentSearchResultsTable,
   printEducationTable,
@@ -12,7 +11,7 @@ import {
   printTable,
 } from "../output/table.js";
 import { runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 function parsePeriodDays(input: string | undefined): number | undefined {
   if (!input) {
@@ -48,61 +47,60 @@ export function registerProfileCommand(program: Command): void {
               periodDays: parsePeriodDays(options.period),
             });
 
-            if (context.json) {
-              printJson(posts);
-              return;
-            }
-
-            printContentSearchResultsTable(posts.items);
+            await outputForCommand(context, posts, {
+              title: `${linkedinUrl ?? "My"} LinkedIn posts`,
+              quietValue: posts.count,
+              renderTable: () => printContentSearchResultsTable(posts.items),
+            });
             return;
           }
 
           const deepProfile = options.deep ? await api.getDeepProfile(identifier) : undefined;
           const profile = deepProfile ?? (await api.getProfile(identifier));
+          await outputForCommand(context, profile, {
+            title: `${profile.fullName} LinkedIn profile`,
+            quietValue: profile.profileUrl ?? profile.fullName,
+            renderTable: () => {
+              printProfileSummary(profile);
 
-          if (context.json) {
-            printJson(profile);
-            return;
-          }
+              if (profile.experience?.length) {
+                console.log("");
+                printExperienceTable(profile.experience.slice(0, 8));
+              }
 
-          printProfileSummary(profile);
+              if (profile.education?.length) {
+                console.log("");
+                printEducationTable(profile.education.slice(0, 8));
+              }
 
-          if (profile.experience?.length) {
-            console.log("");
-            printExperienceTable(profile.experience.slice(0, 8));
-          }
+              if (deepProfile) {
+                const detailedProfile = deepProfile as DeepProfileSummary;
 
-          if (profile.education?.length) {
-            console.log("");
-            printEducationTable(profile.education.slice(0, 8));
-          }
+                if (detailedProfile.skills.length) {
+                  console.log("");
+                  printTable(
+                    ["Skill", "Endorsements"],
+                    detailedProfile.skills.slice(0, 12).map((skill) => [skill.name, skill.endorsementsCount]),
+                  );
+                }
 
-          if (deepProfile) {
-            const detailedProfile = deepProfile as DeepProfileSummary;
+                if (detailedProfile.featured.length) {
+                  console.log("");
+                  printTable(
+                    ["Featured", "Type", "URL"],
+                    detailedProfile.featured.slice(0, 8).map((item) => [item.title, item.type, item.url]),
+                  );
+                }
 
-            if (detailedProfile.skills.length) {
-              console.log("");
-              printTable(
-                ["Skill", "Endorsements"],
-                detailedProfile.skills.slice(0, 12).map((skill) => [skill.name, skill.endorsementsCount]),
-              );
-            }
-
-            if (detailedProfile.featured.length) {
-              console.log("");
-              printTable(
-                ["Featured", "Type", "URL"],
-                detailedProfile.featured.slice(0, 8).map((item) => [item.title, item.type, item.url]),
-              );
-            }
-
-            console.log("");
-            printKeyValue([
-              ["Posts in last 30 days", detailedProfile.activity.postsLast30Days],
-              ["Recommendations received", detailedProfile.recommendationsReceived.count],
-              ["Recommendations given", detailedProfile.recommendationsGiven.count],
-            ]);
-          }
+                console.log("");
+                printKeyValue([
+                  ["Posts in last 30 days", detailedProfile.activity.postsLast30Days],
+                  ["Recommendations received", detailedProfile.recommendationsReceived.count],
+                  ["Recommendations given", detailedProfile.recommendationsGiven.count],
+                ]);
+              }
+            },
+          });
         } finally {
           await close();
         }

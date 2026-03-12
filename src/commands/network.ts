@@ -1,10 +1,9 @@
 import type { Command } from "commander";
 
-import { printJson } from "../output/json.js";
 import { printNetworkMapSummary, printProfileViewersTable, printTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 export function registerNetworkCommand(program: Command): void {
   const network = program.command("network").description("LinkedIn network insights");
@@ -22,15 +21,15 @@ export function registerNetworkCommand(program: Command): void {
             sent: Boolean(options.sent),
           });
 
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printTable(
-            ["Name", "Headline", "Sent"],
-            result.items.map((item) => [item.fullName, item.headline, item.sent ? "yes" : "no"]),
-          );
+          await outputForCommand(context, result, {
+            title: options.sent ? "Sent LinkedIn invitations" : "Received LinkedIn invitations",
+            quietValue: result.count,
+            renderTable: () =>
+              printTable(
+                ["Name", "Headline", "Sent"],
+                result.items.map((item) => [item.fullName, item.headline, item.sent ? "yes" : "no"]),
+              ),
+          });
         } finally {
           await close();
         }
@@ -45,16 +44,15 @@ export function registerNetworkCommand(program: Command): void {
         const { context, api, close } = await getApiForCommand(command);
         try {
           const result = await api.getSuggestions(withDefaultLimit(context.limit, 20));
-
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printTable(
-            ["Name", "Headline", "Profile"],
-            result.items.map((item) => [item.fullName, item.headline, item.profileUrl]),
-          );
+          await outputForCommand(context, result, {
+            title: "LinkedIn network suggestions",
+            quietValue: result.count,
+            renderTable: () =>
+              printTable(
+                ["Name", "Headline", "Profile"],
+                result.items.map((item) => [item.fullName, item.headline, item.profileUrl]),
+              ),
+          });
         } finally {
           await close();
         }
@@ -69,13 +67,11 @@ export function registerNetworkCommand(program: Command): void {
         const { context, api, close } = await getApiForCommand(command);
         try {
           const result = await api.getNetworkMap(withDefaultLimit(context.limit, 250));
-
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printNetworkMapSummary(result);
+          await outputForCommand(context, result, {
+            title: "LinkedIn network map",
+            quietValue: result.totalConnections,
+            renderTable: () => printNetworkMapSummary(result),
+          });
         } finally {
           await close();
         }
@@ -90,13 +86,11 @@ export function registerNetworkCommand(program: Command): void {
         const { context, api, close } = await getApiForCommand(command);
         try {
           const result = await api.getProfileViewers(withDefaultLimit(context.limit, 20));
-
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printProfileViewersTable(result);
+          await outputForCommand(context, result, {
+            title: "LinkedIn profile viewers",
+            quietValue: result.count,
+            renderTable: () => printProfileViewersTable(result),
+          });
         } finally {
           await close();
         }

@@ -9,6 +9,7 @@ Use `linkedin-cli` to read data from a logged-in LinkedIn account through the `l
 3. Treat this CLI as read-only. Do not assume it can safely mutate LinkedIn state.
 4. For list-style commands, add `--limit N` when you only need a small sample.
 5. The CLI prefers browser-backed requests using its saved Playwright Chrome profile, so auth state lives in both `session.json` and `~/.config/linkedin-cli/browser-profile/`.
+6. The CLI now supports shared output modes: `--json`, `--csv`, `--md`, `--html`, `--output <filepath>`, `--copy`, and `--quiet`.
 
 ## Authentication commands
 
@@ -20,7 +21,7 @@ linkedin logout
 
 - `linkedin login`: opens Chrome with a persistent profile, waits for a manual LinkedIn sign-in, then saves the `li_at` and `JSESSIONID` cookies.
 - `linkedin status`: validates the saved session against the Voyager `/me` endpoint.
-- `linkedin logout`: deletes the saved session file.
+- `linkedin logout`: deletes the saved session file and resets the CLI-only browser profile.
 
 ## Profile commands
 
@@ -63,7 +64,9 @@ linkedin connections list --company "Google" --title "engineer" --json
 linkedin connections --search "John" --json
 linkedin connections --count --json
 linkedin connections --recent --limit 20 --json
-linkedin connections export --format csv
+linkedin connections export
+linkedin connections list --limit 50 --csv
+linkedin connections list --limit 50 --output connections.csv
 linkedin connections mutual https://www.linkedin.com/in/some-person/ --json
 ```
 
@@ -72,7 +75,7 @@ linkedin connections mutual https://www.linkedin.com/in/some-person/ --json
 - `linkedin connections --search`: filters by name or keywords.
 - `linkedin connections --count`: returns a connection count payload.
 - `linkedin connections --recent`: returns the same connection dataset, biased toward the newest page of results.
-- `linkedin connections export --format csv`: prints CSV to stdout.
+- `linkedin connections export`: emits CSV by default unless another explicit output format is requested.
 - `linkedin connections mutual <url-or-username>`: best-effort mutual connection lookup. If LinkedIn does not expose mutuals to the current account, expect `available: false` with a note instead of a crash.
 
 Useful fields:
@@ -315,7 +318,7 @@ Useful fields:
 - "Show me my recent posts with engagement" -> `linkedin feed --mine --stats --json`
 - "How are my posts performing?" -> `linkedin content stats --period 30d --json`
 - "Who do I know at Google?" -> `linkedin connections list --company "Google" --json`
-- "Export my connections to CSV" -> `linkedin connections export --format csv`
+- "Export my connections to CSV" -> `linkedin connections list --output connections.csv`
 - "Who are the mutual connections between me and X?" -> `linkedin connections mutual <url> --json`
 - "Find AI engineers in my network" -> `linkedin search people "AI engineer" --json`
 - "Find senior AI engineers in Israel" -> `linkedin search people "AI engineer" --title "senior" --location "Israel" --json`
@@ -356,5 +359,11 @@ Examples:
 
 - Terminal tables are for humans.
 - `--json` is for agents, scripts, and `jq`.
+- `--csv` is best for flat list datasets like connections, employees, and jobs.
+- `--md` is useful for sharing profile briefs and report-like summaries.
+- `--html` is best for richer report exports such as company snapshots and content-performance summaries.
+- `--output <filepath>` infers format from `.json`, `.csv`, `.md`, and `.html` extensions.
+- `--copy` copies the rendered output to the clipboard after formatting.
+- `--quiet` suppresses wrapper text and returns the most essential value or line-oriented list.
 - Counts may come from LinkedIn paging metadata when available, otherwise from the returned item count.
 - Some Voyager endpoints are undocumented and may change. If fields disappear or arrays are empty, retry with `linkedin status --json` first to confirm the session is still valid.

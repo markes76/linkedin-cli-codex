@@ -1,10 +1,9 @@
 import type { Command } from "commander";
 
-import { printJson } from "../output/json.js";
 import { printTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 export function registerNotificationsCommand(program: Command): void {
   program
@@ -20,19 +19,19 @@ export function registerNotificationsCommand(program: Command): void {
             unread: Boolean(options.unread),
           });
 
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printTable(
-            ["Notification", "Unread", "Occurred"],
-            result.items.map((notification) => [
-              notification.text,
-              notification.unread ? "yes" : "no",
-              notification.occurredAt,
-            ]),
-          );
+          await outputForCommand(context, result, {
+            title: "LinkedIn notifications",
+            quietValue: result.count,
+            renderTable: () =>
+              printTable(
+                ["Notification", "Unread", "Occurred"],
+                result.items.map((notification) => [
+                  notification.text,
+                  notification.unread ? "yes" : "no",
+                  notification.occurredAt,
+                ]),
+              ),
+          });
         } finally {
           await close();
         }

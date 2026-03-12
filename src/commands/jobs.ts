@@ -1,10 +1,9 @@
 import type { Command } from "commander";
 
-import { printJson } from "../output/json.js";
 import { printJobDetailSummary, printJobsTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 function registerJobsBucket(jobs: Command, bucket: "saved" | "applied" | "recommended", description: string): void {
   jobs
@@ -15,13 +14,11 @@ function registerJobsBucket(jobs: Command, bucket: "saved" | "applied" | "recomm
         const { context, api, close } = await getApiForCommand(command);
         try {
           const result = await api.getJobsBucket(bucket, withDefaultLimit(context.limit, 20));
-
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printJobsTable(result.items);
+          await outputForCommand(context, result, {
+            title: `LinkedIn ${bucket} jobs`,
+            quietValue: result.count,
+            renderTable: () => printJobsTable(result.items),
+          });
         } finally {
           await close();
         }
@@ -53,12 +50,11 @@ export function registerJobsCommand(program: Command): void {
             workplaceType,
           });
 
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printJobsTable(result.items);
+          await outputForCommand(context, result, {
+            title: "LinkedIn jobs search",
+            quietValue: result.count,
+            renderTable: () => printJobsTable(result.items),
+          });
         } finally {
           await close();
         }
@@ -73,13 +69,11 @@ export function registerJobsCommand(program: Command): void {
         const { context, api, close } = await getApiForCommand(command);
         try {
           const result = await api.getJobDetails(jobUrl);
-
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printJobDetailSummary(result);
+          await outputForCommand(context, result, {
+            title: "LinkedIn job detail",
+            quietValue: result.id ?? result.title,
+            renderTable: () => printJobDetailSummary(result),
+          });
         } finally {
           await close();
         }

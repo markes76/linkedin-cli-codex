@@ -1,10 +1,9 @@
 import type { Command } from "commander";
 
-import { printJson } from "../output/json.js";
 import { printTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 export function registerMessagesCommand(program: Command): void {
   program
@@ -22,21 +21,21 @@ export function registerMessagesCommand(program: Command): void {
             search: options.search,
           });
 
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printTable(
-            ["Title", "Participants", "Unread", "Updated", "Snippet"],
-            result.items.map((message) => [
-              message.title,
-              message.participants.join(", "),
-              message.unread ? "yes" : "no",
-              message.updatedAt,
-              message.snippet,
-            ]),
-          );
+          await outputForCommand(context, result, {
+            title: "LinkedIn messages",
+            quietValue: result.count,
+            renderTable: () =>
+              printTable(
+                ["Title", "Participants", "Unread", "Updated", "Snippet"],
+                result.items.map((message) => [
+                  message.title,
+                  message.participants.join(", "),
+                  message.unread ? "yes" : "no",
+                  message.updatedAt,
+                  message.snippet,
+                ]),
+              ),
+          });
         } finally {
           await close();
         }

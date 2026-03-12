@@ -1,28 +1,10 @@
-import { writeFile } from "node:fs/promises";
-
 import type { Command } from "commander";
 
-import type { ConnectionSummary } from "../api/types.js";
-import { toCsv } from "../output/csv.js";
-import { printJson } from "../output/json.js";
 import { printConnectionsTable, printKeyValue, printMutualConnectionsTable } from "../output/table.js";
 import { parseLinkedInProfileIdentifier } from "../api/voyager.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
-
-function toConnectionRows(items: ConnectionSummary[]): Array<Record<string, string | number | undefined>> {
-  return items.map((connection) => ({
-    name: connection.fullName,
-    headline: connection.headline,
-    currentCompany: connection.currentCompany,
-    currentTitle: connection.currentTitle,
-    location: connection.location,
-    industry: connection.industry,
-    connectedAt: connection.connectedAt,
-    profileUrl: connection.profileUrl,
-  }));
-}
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 async function runConnectionsList(
   options: {
@@ -49,22 +31,19 @@ async function runConnectionsList(
       const payload = {
         count: result.total ?? result.items.length,
       };
-
-      if (context.json) {
-        printJson(payload);
-        return;
-      }
-
-      printKeyValue([["Connections", payload.count]]);
+      await outputForCommand(context, payload, {
+        title: "LinkedIn connection count",
+        quietValue: payload.count,
+        renderTable: () => printKeyValue([["Connections", payload.count]]),
+      });
       return;
     }
 
-    if (context.json) {
-      printJson(result);
-      return;
-    }
-
-    printConnectionsTable(result.items);
+    await outputForCommand(context, result, {
+      title: "LinkedIn connections",
+      quietValue: result.count,
+      renderTable: () => printConnectionsTable(result.items),
+    });
   } finally {
     await close();
   }
@@ -106,8 +85,6 @@ export function registerConnectionsCommand(program: Command): void {
     .option("--company <company>", "Filter connections by current company")
     .option("--title <title>", "Filter connections by current title")
     .option("--sort <sort>", "Sort order", "default")
-    .option("--format <format>", "Export format", "csv")
-    .option("--output <filepath>", "Write the export to a file")
     .action((options, command) =>
       runCommand(async () => {
         const { context, api, close } = await getApiForCommand(command);
@@ -120,27 +97,11 @@ export function registerConnectionsCommand(program: Command): void {
             title: options.title,
           });
 
-          if (options.format === "json") {
-            if (options.output) {
-              await writeFile(options.output, JSON.stringify(result.items, null, 2), "utf8");
-              return;
-            }
-
-            printJson(result.items);
-            return;
-          }
-
-          const csv = toCsv(
-            ["name", "headline", "currentCompany", "currentTitle", "location", "industry", "connectedAt", "profileUrl"],
-            toConnectionRows(result.items),
-          );
-
-          if (options.output) {
-            await writeFile(options.output, csv, "utf8");
-            return;
-          }
-
-          process.stdout.write(csv);
+          const exportContext = context.format === "table" ? { ...context, format: "csv" as const } : context;
+          await outputForCommand(exportContext, result.items, {
+            title: "LinkedIn connections export",
+            quietValue: result.items.length,
+          });
         } finally {
           await close();
         }
@@ -155,13 +116,11 @@ export function registerConnectionsCommand(program: Command): void {
         const { context, api, close } = await getApiForCommand(command);
         try {
           const result = await api.getMutualConnections(parseLinkedInProfileIdentifier(linkedinUrl), withDefaultLimit(context.limit, 25));
-
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printMutualConnectionsTable(result);
+          await outputForCommand(context, result, {
+            title: "LinkedIn mutual connections",
+            quietValue: result.total,
+            renderTable: () => printMutualConnectionsTable(result),
+          });
         } finally {
           await close();
         }

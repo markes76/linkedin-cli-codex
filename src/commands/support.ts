@@ -6,8 +6,8 @@ import type { CommandContext } from "../api/types.js";
 import { VoyagerClient } from "../api/client.js";
 import { VoyagerApi } from "../api/voyager.js";
 import { requireSession, readSession } from "../auth/session.js";
-import { printJson } from "../output/json.js";
 import { setColorEnabled } from "../output/colors.js";
+import { outputResult, type OutputOptions } from "../output/dispatch.js";
 import { getCommandContext } from "../utils/command.js";
 
 export async function getApiForCommand(command: Command): Promise<{
@@ -34,18 +34,13 @@ export async function getSavedSessionStatus(): Promise<{
   savedAt?: string;
 }> {
   return {
-    context: { json: false, color: true },
+    context: { json: false, color: true, format: "table", copy: false, quiet: false },
     savedAt: (await readSession())?.savedAt,
   };
 }
 
-export function outputJsonOrTable<T>(context: CommandContext, payload: T, renderTable: () => void): void {
-  if (context.json) {
-    printJson(payload);
-    return;
-  }
-
-  renderTable();
+export async function outputForCommand<T>(context: CommandContext, payload: T, options: OutputOptions<T>): Promise<void> {
+  await outputResult(context, payload, options);
 }
 
 export async function readBundledSkill(): Promise<string> {

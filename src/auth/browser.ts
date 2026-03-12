@@ -14,7 +14,7 @@ const LOGIN_URL = "https://www.linkedin.com/login";
 const APP_URL = "https://www.linkedin.com/";
 const LOGIN_TIMEOUT_MS = 15 * 60 * 1000;
 const COOKIE_POLL_INTERVAL_MS = 1500;
-const BROWSER_STEP_TIMEOUT_MS = 15000;
+const BROWSER_STEP_TIMEOUT_MS = 30000;
 
 type PersistentContextOptions = NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
 

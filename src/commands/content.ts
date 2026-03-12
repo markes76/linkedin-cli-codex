@@ -1,11 +1,10 @@
 import type { Command } from "commander";
 
-import { printJson } from "../output/json.js";
 import { parseLinkedInProfileIdentifier } from "../api/voyager.js";
 import { printContentSearchResultsTable, printContentStatsSummary, printFeedItemsTable, printHashtagResearchSummary } from "../output/table.js";
 import { runCommand } from "../utils/errors.js";
 import { withDefaultLimit } from "../utils/command.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 function parsePeriodDays(input: string | undefined): number {
   const raw = (input ?? "30d").trim().toLowerCase();
@@ -35,17 +34,18 @@ export function registerContentCommand(program: Command): void {
             top: Number.isFinite(options.top) && options.top > 0 ? options.top : 5,
           });
 
-          if (context.json) {
-            printJson(stats);
-            return;
-          }
+          await outputForCommand(context, stats, {
+            title: "LinkedIn content stats",
+            quietValue: stats.totalPosts,
+            renderTable: () => {
+              printContentStatsSummary(stats);
 
-          printContentStatsSummary(stats);
-
-          if (stats.topPosts.length) {
-            console.log("");
-            printFeedItemsTable(stats.topPosts);
-          }
+              if (stats.topPosts.length) {
+                console.log("");
+                printFeedItemsTable(stats.topPosts);
+              }
+            },
+          });
         } finally {
           await close();
         }
@@ -70,12 +70,11 @@ export function registerContentCommand(program: Command): void {
             type: options.type,
           });
 
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printContentSearchResultsTable(result.items);
+          await outputForCommand(context, result, {
+            title: "LinkedIn content search",
+            quietValue: result.count,
+            renderTable: () => printContentSearchResultsTable(result.items),
+          });
         } finally {
           await close();
         }
@@ -90,13 +89,11 @@ export function registerContentCommand(program: Command): void {
         const { context, api, close } = await getApiForCommand(command);
         try {
           const result = await api.getHashtagResearch(hashtag, withDefaultLimit(context.limit, 10));
-
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printHashtagResearchSummary(result);
+          await outputForCommand(context, result, {
+            title: `LinkedIn hashtag #${result.hashtag}`,
+            quietValue: result.followerCount ?? result.recentPosts.length,
+            renderTable: () => printHashtagResearchSummary(result),
+          });
         } finally {
           await close();
         }

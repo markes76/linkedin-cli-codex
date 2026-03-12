@@ -25,6 +25,12 @@ program
   .description("Unofficial LinkedIn CLI for agentic coding tools")
   .version(VERSION)
   .option("--json", "Output structured JSON")
+  .option("--csv", "Output CSV when the command supports flat export")
+  .option("--md", "Output Markdown")
+  .option("--html", "Output HTML")
+  .option("--output <filepath>", "Write output to a file and infer format from the extension when possible")
+  .option("--copy", "Copy the rendered output to the system clipboard")
+  .option("-q, --quiet", "Suppress non-essential output")
   .option("--no-color", "Disable colored output")
   .option("--limit <number>", "Limit the number of results returned", (value) => Number.parseInt(value, 10))
   .showHelpAfterError();

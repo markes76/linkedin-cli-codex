@@ -1,10 +1,9 @@
 import type { Command } from "commander";
 
-import { printJson } from "../output/json.js";
 import { printCompanyEmployeesTable, printCompanyProfileSummary } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 export function registerCompanyCommand(program: Command): void {
   program
@@ -21,23 +20,20 @@ export function registerCompanyCommand(program: Command): void {
               title: options.title,
             });
 
-            if (context.json) {
-              printJson(result);
-              return;
-            }
-
-            printCompanyEmployeesTable(result.items);
+            await outputForCommand(context, result, {
+              title: `${companyIdentifier} employees`,
+              quietValue: result.count,
+              renderTable: () => printCompanyEmployeesTable(result.items),
+            });
             return;
           }
 
           const result = await api.getCompanyProfile(companyIdentifier);
-
-          if (context.json) {
-            printJson(result);
-            return;
-          }
-
-          printCompanyProfileSummary(result);
+          await outputForCommand(context, result, {
+            title: `${result.name} company profile`,
+            quietValue: result.name,
+            renderTable: () => printCompanyProfileSummary(result),
+          });
         } finally {
           await close();
         }

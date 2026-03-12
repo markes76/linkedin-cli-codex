@@ -1,11 +1,10 @@
 import type { Command } from "commander";
 
 import type { SearchVertical } from "../api/types.js";
-import { printJson } from "../output/json.js";
 import { printSearchResultsTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
-import { getApiForCommand } from "./support.js";
+import { getApiForCommand, outputForCommand } from "./support.js";
 
 function registerSearchVertical(search: Command, vertical: SearchVertical, description: string): void {
   const command = search.command(`${vertical} <query>`).description(description);
@@ -27,12 +26,11 @@ function registerSearchVertical(search: Command, vertical: SearchVertical, descr
               title: options.title,
             });
 
-            if (context.json) {
-              printJson(result);
-              return;
-            }
-
-            printSearchResultsTable(result.items);
+            await outputForCommand(context, result, {
+              title: "LinkedIn people search",
+              quietValue: result.count,
+              renderTable: () => printSearchResultsTable(result.items),
+            });
           } finally {
             await close();
           }
@@ -46,13 +44,11 @@ function registerSearchVertical(search: Command, vertical: SearchVertical, descr
       const { context, api, close } = await getApiForCommand(commandInstance);
       try {
         const result = await api.search(vertical, query, withDefaultLimit(context.limit, 10));
-
-        if (context.json) {
-          printJson(result);
-          return;
-        }
-
-        printSearchResultsTable(result.items);
+        await outputForCommand(context, result, {
+          title: `LinkedIn ${vertical} search`,
+          quietValue: result.count,
+          renderTable: () => printSearchResultsTable(result.items),
+        });
       } finally {
         await close();
       }

@@ -2,13 +2,12 @@ import { access, chmod, rm, writeFile } from "node:fs/promises";
 
 import type { Command } from "commander";
 
-import { printJson } from "../output/json.js";
 import { printKeyValue } from "../output/table.js";
 import { theme } from "../output/colors.js";
 import { CLAUDE_SKILL_FILE, ensureClaudeSkillDir } from "../utils/config.js";
 import { runCommand } from "../utils/errors.js";
 import { getCommandContext } from "../utils/command.js";
-import { readBundledSkill } from "./support.js";
+import { outputForCommand, readBundledSkill } from "./support.js";
 
 async function isInstalled(): Promise<boolean> {
   try {
@@ -37,13 +36,11 @@ export function registerSkillCommand(program: Command): void {
           installed: true,
           path: CLAUDE_SKILL_FILE,
         };
-
-        if (context.json) {
-          printJson(payload);
-          return;
-        }
-
-        console.log(theme.success(`Claude Code skill installed to ${CLAUDE_SKILL_FILE}`));
+        await outputForCommand(context, payload, {
+          title: "linkedin-cli skill install",
+          quietValue: payload.path,
+          renderTable: () => console.log(theme.success(`Claude Code skill installed to ${CLAUDE_SKILL_FILE}`)),
+        });
       }),
     );
 
@@ -59,13 +56,11 @@ export function registerSkillCommand(program: Command): void {
           installed: false,
           path: CLAUDE_SKILL_FILE,
         };
-
-        if (context.json) {
-          printJson(payload);
-          return;
-        }
-
-        console.log(theme.success(`Claude Code skill removed from ${CLAUDE_SKILL_FILE}`));
+        await outputForCommand(context, payload, {
+          title: "linkedin-cli skill uninstall",
+          quietValue: payload.path,
+          renderTable: () => console.log(theme.success(`Claude Code skill removed from ${CLAUDE_SKILL_FILE}`)),
+        });
       }),
     );
 
@@ -79,16 +74,15 @@ export function registerSkillCommand(program: Command): void {
           installed: await isInstalled(),
           path: CLAUDE_SKILL_FILE,
         };
-
-        if (context.json) {
-          printJson(payload);
-          return;
-        }
-
-        printKeyValue([
-          ["Installed", payload.installed ? "yes" : "no"],
-          ["Path", payload.path],
-        ]);
+        await outputForCommand(context, payload, {
+          title: "linkedin-cli skill status",
+          quietValue: payload.installed ? "installed" : "not installed",
+          renderTable: () =>
+            printKeyValue([
+              ["Installed", payload.installed ? "yes" : "no"],
+              ["Path", payload.path],
+            ]),
+        });
       }),
     );
 

@@ -21,10 +21,11 @@ Reusable skill:
 - `~/.codex/skills/linkedin-cli-operator/SKILL.md`
 
 Release state:
-- `v0.1.1` exists on GitHub with uploaded release assets
-- the release workflow only failed on npm publish because `NPM_TOKEN` was not configured
-- the first `v0.1.2` attempt exposed a workflow-expression issue before jobs even started
-- package version has now been bumped to `0.1.3` and the release workflow has been updated to skip npm publish gracefully inside the shell step when no npm token is present
+- `v0.1.3` is live on GitHub and the release workflow completed successfully
+- release assets now match the package version:
+  - `linkedin-cli-0.1.3.tgz`
+  - `linkedin-skill.zip`
+- the release workflow now skips npm publish cleanly when `NPM_TOKEN` is not configured
 
 ## Working Today
 
@@ -88,6 +89,16 @@ Release state:
 - Network suggestions now resolve correctly from the current LinkedIn network page
 - Post search now returns structured items from live content search results
 - GraphQL search handling and several Voyager endpoint mappings were updated for current behavior
+- Shared output modes now work across commands:
+  - `--json`
+  - `--csv`
+  - `--md`
+  - `--html`
+  - `--output <filepath>`
+  - `--copy`
+  - `--quiet`
+- Pagination now hard-limits oversized LinkedIn responses so `--limit` is respected even when LinkedIn over-returns rows
+- Browser step timeouts were increased to make deep-profile reads more resilient on slower LinkedIn pages
 
 ## Known Limitations
 
@@ -101,7 +112,7 @@ Release state:
 - `company employees` is accurate enough to use, but title-filtered results can still be noisy because LinkedIn search ranking is inconsistent
 - We have now done a broader real-account validation pass, but `messages` still uses a browser-page fallback instead of a stable Voyager response because the direct endpoint returned `500`
 - `profile --posts` is now usable for pulling a member's recent posts, but it still returns a best-effort page scrape and may return slightly fewer posts than the requested `--limit`
-- The CLI is still missing the larger Phase 4-5 surface, shared output modes beyond JSON/CSV stdout, and some richer edge-case hardening
+- The CLI is still missing the larger Phase 4-5 surface and some richer edge-case hardening
 
 ## Safety Notes
 
@@ -142,18 +153,21 @@ Release state:
 
 ### Shared Output Layer
 
-Build once and reuse across commands:
+Implemented globally:
+- `--json`
 - `--csv`
-- `--output <filepath>`
 - `--md`
+- `--html`
+- `--output <filepath>`
 - `--copy`
 - `--quiet`
 
 Current output status:
-- pretty terminal tables are in place across the main human-facing commands
-- `--json` works broadly and is the agent-default path
-- CSV exists today through explicit command paths like `linkedin connections export --format csv`
-- the full shared output layer above is still not implemented globally
+- pretty terminal tables remain the default human-facing renderer
+- `--json` remains the agent-default path
+- CSV now works as a shared export mode for flat list outputs
+- Markdown and HTML exports now work for richer summaries and reports
+- file-extension inference works for `.json`, `.csv`, `.md`, and `.html`
 
 ## Real Account Testing Recommendation
 
@@ -236,6 +250,32 @@ Current real-account outcome:
 - `messages` returns structured conversation rows again, but snippets are still best-effort
 - `network viewers` is now good enough to use
 - `profile --posts --period 14d --limit 20` returned 19 recent Ruben Hassid posts in live validation
+
+## Shared Output Validation
+
+Validated from the fresh `dist` build on the real session:
+
+- `linkedin status --json`
+- `linkedin status --md`
+- `linkedin status --json --copy`
+- `linkedin connections --count --quiet`
+- `linkedin connections list --limit 3 --csv`
+- `linkedin profile --deep --md --output /tmp/linkedin-profile.md`
+- `linkedin content stats --period 30d --html --output /tmp/linkedin-content.html`
+- `linkedin company Anthropic --html --output /tmp/anthropic.html`
+- `linkedin network viewers --md`
+- `linkedin jobs search "product manager" --location "Israel" --limit 3 --csv`
+- `linkedin skill status --json`
+- `linkedin messages --json`
+- `linkedin connections list --limit 2 --output /tmp/connections.csv`
+- `linkedin profile https://www.linkedin.com/in/ruben-hassid/ --posts --period 14d --limit 5 --json`
+
+Observed outcomes:
+
+- clipboard copy works and was verified with `pbpaste`
+- output-file inference works for Markdown, CSV, HTML, and JSON
+- the paginator fix resolved a real bug where LinkedIn returned more rows than the requested `--limit`
+- deep-profile Markdown export is now stable again after increasing browser step timeouts
 
 ## Update Rule
 

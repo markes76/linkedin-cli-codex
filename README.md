@@ -17,7 +17,7 @@ Unofficial LinkedIn CLI for agentic coding tools like Claude Code, Cursor, Codex
 - Secure local session storage in `~/.config/linkedin-cli/session.json`
 - Browser-backed Voyager requests that reuse the saved LinkedIn Chrome profile for better auth fidelity
 - Read-only profile, connections, feed, messaging, notification, network, analytics, search, and job commands
-- Pretty terminal output with JSON mode for agents and scripts
+- Shared output layer with table, JSON, CSV, Markdown, HTML, file export, clipboard copy, and quiet mode
 - Claude Code skill install, uninstall, status, and show commands
 - TypeScript + Commander.js + tsup packaging for easy npm publishing
 
@@ -122,7 +122,9 @@ linkedin connections list --company "Google" --title "engineer"
 linkedin connections --search "John"
 linkedin connections --count
 linkedin connections --recent
-linkedin connections export --format csv
+linkedin connections export
+linkedin connections list --limit 20 --csv
+linkedin connections list --limit 20 --output connections.csv
 linkedin connections mutual https://www.linkedin.com/in/some-person/
 ```
 
@@ -218,8 +220,88 @@ linkedin jobs recommended
 
 ```bash
 --json
+--csv
+--md
+--html
+--output <filepath>
+--copy
+--quiet
 --no-color
 --limit N
+```
+
+## Output modes
+
+Use the default table output for terminal reading, and switch formats when you need export or agent-friendly consumption.
+
+### Table (default)
+
+No extra flag required. Good for interactive use:
+
+```bash
+linkedin connections list --limit 10
+```
+
+### JSON
+
+Preferred for agents, automation, and `jq`:
+
+```bash
+linkedin profile --deep --json
+```
+
+### CSV
+
+Best for flat list data such as connections, employee lists, and job search results:
+
+```bash
+linkedin connections list --limit 50 --csv
+linkedin jobs search "product manager" --location "Israel" --csv
+```
+
+### Markdown
+
+Useful for notes, docs, and pasting into Notion or Google Docs:
+
+```bash
+linkedin profile --deep --md
+linkedin network viewers --md
+```
+
+### HTML
+
+Best for richer report-style output:
+
+```bash
+linkedin content stats --period 30d --html --output content-report.html
+linkedin company "Anthropic" --html --output anthropic.html
+```
+
+### File export
+
+Infer the output format from the file extension:
+
+```bash
+linkedin profile --deep --output profile.md
+linkedin connections list --limit 100 --output connections.csv
+linkedin content stats --period 30d --output content-report.html
+linkedin status --output status.json
+```
+
+### Clipboard
+
+Copy the rendered output directly to the clipboard:
+
+```bash
+linkedin status --json --copy
+```
+
+### Quiet mode
+
+Return only the essential scalar or line-oriented value:
+
+```bash
+linkedin connections --count --quiet
 ```
 
 ## AI Agent Skills

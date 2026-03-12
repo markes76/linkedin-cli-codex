@@ -22,12 +22,13 @@ export async function paginate<T>(request: PaginationRequest<T>): Promise<{
     const remaining = request.limit - items.length;
     const count = Math.min(request.pageSize, remaining);
     const page = await request.fetchPage(start, count);
+    const pageItems = page.items.slice(0, remaining);
 
-    items.push(...page.items);
+    items.push(...pageItems);
     total = page.total ?? total;
     nextStart = page.nextStart;
 
-    if (page.items.length === 0 || nextStart === undefined || nextStart === start) {
+    if (pageItems.length === 0 || nextStart === undefined || nextStart === start) {
       break;
     }
 
@@ -40,4 +41,3 @@ export async function paginate<T>(request: PaginationRequest<T>): Promise<{
     nextStart,
   };
 }
-
