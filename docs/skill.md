@@ -26,11 +26,14 @@ linkedin logout
 
 ```bash
 linkedin profile --json
+linkedin profile --deep --json
 linkedin profile https://www.linkedin.com/in/some-person/ --json
+linkedin profile https://www.linkedin.com/in/some-person/ --deep --json
 ```
 
 - `linkedin profile`: returns the viewer profile.
 - `linkedin profile <linkedin-url>`: returns another member's profile when the public identifier can be resolved.
+- `linkedin profile --deep`: returns a best-effort deeper profile object with structured arrays for experience, education, skills, featured items, recommendations, and activity stats.
 
 Output fields usually include:
 
@@ -42,28 +45,58 @@ Output fields usually include:
 - `profileUrl`
 - `experience`
 - `education`
+- `skills`
+- `featured`
+- `activity.postsLast30Days`
 
 ## Connections commands
 
 ```bash
 linkedin connections --json
+linkedin connections list --json
+linkedin connections list --company "Google" --title "engineer" --json
 linkedin connections --search "John" --json
 linkedin connections --count --json
 linkedin connections --recent --limit 20 --json
+linkedin connections export --format csv
 ```
 
 - `linkedin connections`: lists first-degree connections.
+- `linkedin connections list`: explicit list command with company/title filters.
 - `linkedin connections --search`: filters by name or keywords.
 - `linkedin connections --count`: returns a connection count payload.
 - `linkedin connections --recent`: returns the same connection dataset, biased toward the newest page of results.
+- `linkedin connections export --format csv`: prints CSV to stdout.
 
 Useful fields:
 
 - `items[].fullName`
 - `items[].headline`
+- `items[].currentTitle`
+- `items[].currentCompany`
 - `items[].location`
 - `items[].profileUrl`
 - `total`
+
+## Content commands
+
+```bash
+linkedin content stats --period 30d --json
+linkedin content stats --period 90d --top 5 --json
+```
+
+- `linkedin content stats`: returns a performance summary for the authenticated member's recent posts over the requested period.
+
+Useful fields:
+
+- `period`
+- `totalPosts`
+- `totalReactions`
+- `totalComments`
+- `totalReposts`
+- `postingFrequencyPerWeek`
+- `bestPost`
+- `topPosts`
 
 ## Feed and post commands
 
@@ -156,6 +189,7 @@ Useful fields:
 
 ```bash
 linkedin search people "AI engineer" --json
+linkedin search people "AI engineer" --title "senior" --location "Israel" --json
 linkedin search companies "cybersecurity" --json
 linkedin search jobs "product manager" --json
 linkedin search posts "enterprise AI" --json
@@ -167,6 +201,12 @@ Each search payload returns:
 - `items[].subtitle`
 - `items[].location`
 - `items[].url`
+
+People search also includes:
+
+- `items[].connectionDegree`
+- `items[].currentTitle`
+- `items[].currentCompany`
 
 ## Jobs commands
 
@@ -181,8 +221,13 @@ These commands are scaffolded for future Voyager endpoint coverage. Expect empty
 ## Natural language query mapping
 
 - "How many connections do I have?" -> `linkedin connections --count --json`
+- "Give me a deep read of this profile" -> `linkedin profile <linkedin-url> --deep --json`
 - "Show me my recent posts with engagement" -> `linkedin feed --mine --stats --json`
+- "How are my posts performing?" -> `linkedin content stats --period 30d --json`
+- "Who do I know at Google?" -> `linkedin connections list --company "Google" --json`
+- "Export my connections to CSV" -> `linkedin connections export --format csv`
 - "Find AI engineers in my network" -> `linkedin search people "AI engineer" --json`
+- "Find senior AI engineers in Israel" -> `linkedin search people "AI engineer" --title "senior" --location "Israel" --json`
 - "What are my unread messages?" -> `linkedin messages --unread --json`
 - "Show my post analytics for last month" -> `linkedin analytics --json`
 - "Pull my profile summary" -> `linkedin profile --json`
@@ -202,7 +247,9 @@ linkedin analytics --json
 Examples:
 
 - Relationship snapshot: combine `linkedin profile --json` with `linkedin connections --count --json`.
+- Deep person brief: combine `linkedin profile <linkedin-url> --deep --json` with `linkedin connections list --search "<name>" --json`.
 - Content health: combine `linkedin feed --mine --stats --json` with `linkedin analytics --json`.
+- Phase 1 content check: combine `linkedin content stats --period 30d --json` with `linkedin feed --mine --stats --json`.
 - Inbox triage: combine `linkedin messages --unread --json` with `linkedin notifications --unread --json`.
 - Recruiting lookup: combine `linkedin search people "AI engineer" --json` with `linkedin connections --search "AI engineer" --json`.
 

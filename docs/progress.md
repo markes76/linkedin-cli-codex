@@ -45,6 +45,14 @@ Git status:
 - `linkedin network suggestions --limit 3 --json`
 - `linkedin analytics --json`
 
+### Phase 1 Features Now Added
+
+- `linkedin profile --deep`
+- `linkedin connections list`
+- `linkedin connections export --format csv`
+- `linkedin content stats --period 30d`
+- `linkedin search people ... --title ... --location ...`
+
 ### Important Fixes Already Landed
 
 - Browser-backed requests now navigate to the requested LinkedIn page instead of reusing the wrong tab
@@ -69,13 +77,19 @@ Git status:
 
 ## Recommended Next Build Phase
 
-### Phase 1
+### Remaining Phase 1 Cleanup
 
-- `linkedin profile <url-or-username> --deep`
-- `linkedin connections list`
-- `linkedin connections export`
-- `linkedin content stats --period ...`
-- harden `linkedin search people`
+- tighten `profile --deep` further on richer public profiles, especially featured/skills extraction
+- decide whether to trim very large `raw` payloads from search JSON output
+- add a short README update for the new Phase 1 command surface if we want docs parity
+
+### Phase 2
+
+- `linkedin connections mutual`
+- `linkedin network map`
+- `linkedin network viewers`
+- `linkedin company <url-or-name>`
+- `linkedin company <url-or-name> employees`
 
 ### Shared Output Layer
 

@@ -1,6 +1,8 @@
 import type {
   AnalyticsSummary,
   ConnectionSummary,
+  ContentStatsSummary,
+  DeepProfileSummary,
   FeedItemSummary,
   InvitationSummary,
   JobSummary,
@@ -9,6 +11,16 @@ import type {
   NotificationSummary,
   PaginatedResult,
   ProfileSummary,
+  ProfileEducation,
+  ProfileFeaturedItem,
+  ProfilePosition,
+  ProfileSkill,
+  ProfileVolunteerExperience,
+  ProfileCertification,
+  ProfileLanguage,
+  ProfilePatent,
+  ProfilePublication,
+  PeopleSearchResultSummary,
   SearchResultSummary,
   SearchVertical,
   StatusSummary,
@@ -193,6 +205,94 @@ function isSearchPostsStopLine(value: string): boolean {
     /\b\d+\s+(likes?|comments?|reposts?|followers?)\b/i.test(value) ||
     /visible to anyone on or off linkedin/i.test(value)
   );
+}
+
+function splitHeadlineRole(headline: string | undefined): { currentTitle?: string; currentCompany?: string } {
+  const normalized = normalizeLine(headline ?? "");
+  if (!normalized) {
+    return {};
+  }
+
+  const atMatch = normalized.match(/^(.*?)\s+at\s+(.+)$/i);
+  if (atMatch) {
+    return {
+      currentTitle: atMatch[1]?.trim() || undefined,
+      currentCompany: atMatch[2]?.trim() || undefined,
+    };
+  }
+
+  const handleMatch = normalized.match(/^(.*?)\s+@\s+(.+)$/);
+  if (handleMatch) {
+    return {
+      currentTitle: handleMatch[1]?.trim() || undefined,
+      currentCompany: handleMatch[2]?.trim() || undefined,
+    };
+  }
+
+  return { currentTitle: normalized };
+}
+
+function looksLikeDateRange(value: string): boolean {
+  return /\b\d{4}\b/.test(value) && /(?:Present|present|–|-|yrs?|mos?)/.test(value);
+}
+
+function parseDateRange(value: string): { startDate?: string; endDate?: string; duration?: string } {
+  const [datesPart, duration] = value.split("·").map((part) => normalizeLine(part));
+  if (!datesPart) {
+    return {};
+  }
+
+  const separator = datesPart.includes("–") ? "–" : datesPart.includes("-") ? "-" : undefined;
+  if (!separator) {
+    return { startDate: datesPart, duration };
+  }
+
+  const [startDate, endDate] = datesPart.split(separator).map((part) => normalizeLine(part));
+  return {
+    startDate,
+    endDate,
+    duration,
+  };
+}
+
+function looksLikeLocation(value: string): boolean {
+  return /,/.test(value) || /\b(remote|hybrid|on-site|onsite)\b/i.test(value);
+}
+
+function isSectionNoise(value: string): boolean {
+  return /^(show all|show more|show less|follow|connect|message|see all details|load more|top skills|endorsed by|view full profile)$/i.test(
+    value,
+  );
+}
+
+function isProfilePromptLine(value: string): boolean {
+  return /^(showcase your accomplishments|show your qualifications|communicate your fit for new opportunities|members who add an industry|members who include a summary|write a summary|which industry do you work in\?|private to you|job title|organization|school|degree, field of study|soft skills|technical skills|add experience|add education|add skills|add industry|add a summary)$/i.test(
+    value,
+  );
+}
+
+function countRecentPostsFromLines(lines: string[], days: number): number {
+  return lines.filter((line) => {
+    const normalized = line.toLowerCase();
+    const compactMatch = normalized.match(/^(\d+)([hdwm])\b/);
+    if (compactMatch) {
+      const amount = Number.parseInt(compactMatch[1] ?? "0", 10);
+      const unit = compactMatch[2];
+      const ageDays = unit === "h" ? amount / 24 : unit === "d" ? amount : unit === "w" ? amount * 7 : amount * 30;
+      return ageDays <= days;
+    }
+
+    const wordsMatch = normalized.match(/^(\d+)\s+(hour|hours|day|days|week|weeks|month|months)\b/);
+    if (!wordsMatch) {
+      return false;
+    }
+
+    const amount = Number.parseInt(wordsMatch[1] ?? "0", 10);
+    const unit = wordsMatch[2];
+    const ageDays =
+      unit?.startsWith("hour") ? amount / 24 : unit?.startsWith("day") ? amount : unit?.startsWith("week") ? amount * 7 : amount * 30;
+    return ageDays <= days;
+  }).length;
 }
 
 function buildProfileUrl(publicIdentifier?: string): string | undefined {
@@ -400,8 +500,10 @@ function parseSearchResult(type: SearchVertical, item: unknown): SearchResultSum
     textValue(searchItem.subline),
     textValue(record.subline),
   );
+  const roleInfo = type === "people" ? splitHeadlineRole(subtitle) : {};
+  const connectionDegree = firstDefined(textValue(searchItem.badgeText), textValue(record.badgeText));
 
-  return {
+  const result = {
     id: getUrnId(
       firstDefined(
         textValue(searchItem.targetUrn),
@@ -429,7 +531,21 @@ function parseSearchResult(type: SearchVertical, item: unknown): SearchResultSum
       textValue(record.description),
     ),
     raw: item,
-  };
+  } satisfies SearchResultSummary;
+
+  if (type === "people") {
+    const peopleResult: PeopleSearchResultSummary = {
+      ...result,
+      type: "people",
+      connectionDegree,
+      currentCompany: roleInfo.currentCompany,
+      currentTitle: roleInfo.currentTitle,
+    };
+
+    return peopleResult;
+  }
+
+  return result;
 }
 
 function parseConnection(item: unknown): ConnectionSummary | null {
@@ -440,12 +556,15 @@ function parseConnection(item: unknown): ConnectionSummary | null {
   }
 
   const publicIdentifier = extractPublicIdentifier(result.url);
+  const roleInfo = splitHeadlineRole(result.subtitle);
 
   return {
     id: result.id,
     publicIdentifier,
     fullName: result.title,
     headline: result.subtitle,
+    currentCompany: roleInfo.currentCompany,
+    currentTitle: roleInfo.currentTitle,
     location: result.location,
     profileUrl: result.url ?? buildProfileUrl(publicIdentifier),
     raw: item,
@@ -650,6 +769,221 @@ function sortTopPosts(items: FeedItemSummary[]): FeedItemSummary[] {
   });
 }
 
+function parseExperienceSection(lines: string[]): ProfilePosition[] {
+  const content = lines.slice(1).filter((line) => !isSectionNoise(line) && !isProfilePromptLine(line));
+  if (content.length === 0 || lines.some((line) => /^add experience$/i.test(line))) {
+    return [];
+  }
+  const items: ProfilePosition[] = [];
+  let current: ProfilePosition | null = null;
+
+  for (const line of content) {
+    if (looksLikeDateRange(line)) {
+      current = { ...(current ?? {}), ...parseDateRange(line) };
+      continue;
+    }
+
+    if (!current) {
+      current = { title: line };
+      continue;
+    }
+
+    if (!current.title) {
+      current.title = line;
+      continue;
+    }
+
+    if (!current.company) {
+      current.company = line;
+      continue;
+    }
+
+    if (!current.location && looksLikeLocation(line)) {
+      current.location = line;
+      continue;
+    }
+
+    if (current.title && current.company && (current.startDate || current.duration)) {
+      items.push(current);
+      current = { title: line };
+      continue;
+    }
+
+    current.description = [current.description, line].filter(Boolean).join(" ");
+  }
+
+  if (current?.title || current?.company) {
+    items.push(current);
+  }
+
+  return items;
+}
+
+function parseEducationSection(lines: string[]): ProfileEducation[] {
+  const content = lines.slice(1).filter((line) => !isSectionNoise(line) && !isProfilePromptLine(line));
+  if (content.length === 0 || lines.some((line) => /^add education$/i.test(line))) {
+    return [];
+  }
+  const items: ProfileEducation[] = [];
+  let current: ProfileEducation | null = null;
+
+  for (const line of content) {
+    if (/^\d{4}\s*[–-]\s*(?:\d{4}|Present)?$/i.test(line)) {
+      current = { ...(current ?? {}), ...parseDateRange(line) };
+      continue;
+    }
+
+    if (!current) {
+      current = { school: line };
+      continue;
+    }
+
+    if (!current.school) {
+      current.school = line;
+      continue;
+    }
+
+    if (current.school && (current.startDate || current.endDate)) {
+      items.push(current);
+      current = { school: line };
+      continue;
+    }
+
+    if (!current.degree) {
+      current.degree = line;
+      continue;
+    }
+
+    current.description = [current.description, line].filter(Boolean).join(" ");
+  }
+
+  if (current?.school) {
+    items.push(current);
+  }
+
+  return items;
+}
+
+function parseSkillsSection(lines: string[]): ProfileSkill[] {
+  if (lines.some((line) => /^add skills$/i.test(line))) {
+    return [];
+  }
+
+  return lines
+    .slice(1)
+    .filter((line) => !isSectionNoise(line) && !/endorsed by/i.test(line) && !isProfilePromptLine(line))
+    .reduce<ProfileSkill[]>((skills, line) => {
+      const endorsementMatch = line.match(/(\d+)\s+endorsements?/i);
+      if (endorsementMatch && skills.length > 0) {
+        skills[skills.length - 1] = {
+          ...skills[skills.length - 1],
+          endorsementsCount: Number.parseInt(endorsementMatch[1] ?? "0", 10),
+        };
+        return skills;
+      }
+
+      skills.push({ name: line });
+      return skills;
+    }, []);
+}
+
+function parseFeaturedSection(lines: string[], links: string[]): ProfileFeaturedItem[] {
+  const content = lines.slice(1).filter((line) => !isSectionNoise(line));
+  return content.slice(0, Math.min(content.length, links.length || content.length)).map((line, index) => ({
+    title: line,
+    url: links[index],
+  }));
+}
+
+function parseLanguageSection(lines: string[]): ProfileLanguage[] {
+  const content = lines.slice(1).filter((line) => !isSectionNoise(line));
+  const items: ProfileLanguage[] = [];
+
+  for (let index = 0; index < content.length; index += 1) {
+    const name = content[index];
+    const proficiency = content[index + 1] && !content[index + 1].includes("endorsement") ? content[index + 1] : undefined;
+    items.push({ name, proficiency });
+    if (proficiency) {
+      index += 1;
+    }
+  }
+
+  return items;
+}
+
+function parseCertificationSection(lines: string[]): ProfileCertification[] {
+  const content = lines.slice(1).filter((line) => !isSectionNoise(line));
+  const items: ProfileCertification[] = [];
+
+  for (let index = 0; index < content.length; index += 2) {
+    items.push({
+      name: content[index] ?? "Certification",
+      issuer: content[index + 1],
+    });
+  }
+
+  return items;
+}
+
+function parseVolunteerSection(lines: string[]): ProfileVolunteerExperience[] {
+  const content = lines.slice(1).filter((line) => !isSectionNoise(line));
+  const items: ProfileVolunteerExperience[] = [];
+  let current: ProfileVolunteerExperience | null = null;
+
+  for (const line of content) {
+    if (looksLikeDateRange(line)) {
+      current = { ...(current ?? {}), ...parseDateRange(line) };
+      continue;
+    }
+
+    if (!current) {
+      current = { role: line };
+      continue;
+    }
+
+    if (!current.organization) {
+      current.organization = line;
+      continue;
+    }
+
+    if (current.role && current.organization && (current.startDate || current.endDate)) {
+      items.push(current);
+      current = { role: line };
+      continue;
+    }
+
+    current.description = [current.description, line].filter(Boolean).join(" ");
+  }
+
+  if (current?.role || current?.organization) {
+    items.push(current);
+  }
+
+  return items;
+}
+
+function parsePublicationsSection(lines: string[]): ProfilePublication[] {
+  return lines
+    .slice(1)
+    .filter((line) => !isSectionNoise(line))
+    .map((line) => ({ title: line }));
+}
+
+function parsePatentsSection(lines: string[]): ProfilePatent[] {
+  return lines
+    .slice(1)
+    .filter((line) => !isSectionNoise(line))
+    .map((line) => ({ title: line }));
+}
+
+function parseRecommendationSection(lines: string[]): { count: number; previews: string[] } {
+  const previews = lines.slice(1).filter((line) => !isSectionNoise(line)).slice(0, 3);
+  return {
+    count: previews.length,
+    previews,
+  };
+}
+
 export function parseLinkedInProfileIdentifier(input: string): string {
   const trimmed = input.trim();
 
@@ -725,10 +1059,57 @@ export class VoyagerApi {
     return this.scrapePublicProfile(normalized);
   }
 
+  async getDeepProfile(identifier?: string): Promise<DeepProfileSummary> {
+    const normalized = identifier ? parseLinkedInProfileIdentifier(identifier) : undefined;
+    const viewerStatus = await this.getStatus();
+    const isViewer = !normalized || normalized === viewerStatus.publicIdentifier || normalized === viewerStatus.memberId;
+    const baseProfile = await this.getProfile(normalized);
+    let pageProfile = await this.scrapeDeepProfilePage(baseProfile.profileUrl ?? buildProfileUrl(normalized) ?? undefined);
+
+    if (!isViewer && pageProfile.experience.length === 0 && pageProfile.education.length === 0) {
+      pageProfile = await this.scrapeDeepProfilePage(baseProfile.profileUrl ?? buildProfileUrl(normalized) ?? undefined);
+    }
+
+    const deepProfile: DeepProfileSummary = {
+      ...baseProfile,
+      experience: pageProfile.experience.length ? pageProfile.experience : baseProfile.experience ?? [],
+      education: pageProfile.education.length ? pageProfile.education : baseProfile.education ?? [],
+      skills: pageProfile.skills,
+      certifications: pageProfile.certifications,
+      languages: pageProfile.languages,
+      volunteerExperience: pageProfile.volunteerExperience,
+      publications: pageProfile.publications,
+      patents: pageProfile.patents,
+      featured: pageProfile.featured,
+      recommendationsGiven: pageProfile.recommendationsGiven,
+      recommendationsReceived: pageProfile.recommendationsReceived,
+      activity: {
+        followers: baseProfile.followers,
+        connections: baseProfile.connections,
+        postsLast30Days: pageProfile.activity.postsLast30Days,
+      },
+    };
+
+    if (isViewer) {
+      const recentFeed = await this.getFeed({ limit: 50, mine: true });
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      deepProfile.activity.postsLast30Days = recentFeed.items.filter((item) => {
+        const timestamp = item.publishedAt ? Date.parse(item.publishedAt) : Number.NaN;
+        return !Number.isNaN(timestamp) && timestamp >= cutoff;
+      }).length;
+      deepProfile.followers = baseProfile.followers ?? deepProfile.activity.followers;
+      deepProfile.connections = baseProfile.connections ?? deepProfile.activity.connections;
+    }
+
+    return deepProfile;
+  }
+
   async getConnections(options: {
     limit: number;
     search?: string;
     recent?: boolean;
+    company?: string;
+    title?: string;
   }): Promise<PaginatedResult<ConnectionSummary>> {
     const keywords = options.search?.trim();
     const paged = await paginate({
@@ -748,6 +1129,16 @@ export class VoyagerApi {
         );
 
         let items = extractElements(data).map(parseConnection).filter((item): item is ConnectionSummary => Boolean(item));
+
+        if (options.company) {
+          const companyQuery = options.company.toLowerCase();
+          items = items.filter((item) => item.currentCompany?.toLowerCase().includes(companyQuery));
+        }
+
+        if (options.title) {
+          const titleQuery = options.title.toLowerCase();
+          items = items.filter((item) => item.currentTitle?.toLowerCase().includes(titleQuery));
+        }
 
         if (options.recent) {
           items = items.reverse();
@@ -952,6 +1343,71 @@ export class VoyagerApi {
     };
   }
 
+  async searchPeople(options: {
+    keywords: string;
+    limit: number;
+    company?: string;
+    title?: string;
+    location?: string;
+  }): Promise<PaginatedResult<PeopleSearchResultSummary>> {
+    const result = await this.search("people", options.keywords, options.limit * 2);
+    let items = result.items.filter((item): item is PeopleSearchResultSummary => item.type === "people");
+
+    if (options.company) {
+      const companyQuery = options.company.toLowerCase();
+      items = items.filter((item) => item.currentCompany?.toLowerCase().includes(companyQuery));
+    }
+
+    if (options.title) {
+      const titleQuery = options.title.toLowerCase();
+      items = items.filter((item) => item.currentTitle?.toLowerCase().includes(titleQuery));
+    }
+
+    if (options.location) {
+      const locationQuery = options.location.toLowerCase();
+      items = items.filter((item) => item.location?.toLowerCase().includes(locationQuery));
+    }
+
+    items = items.slice(0, options.limit);
+
+    return {
+      items,
+      start: 0,
+      count: items.length,
+      total: items.length,
+      nextStart: undefined,
+    };
+  }
+
+  async getContentStats(options: { periodDays: number; top: number }): Promise<ContentStatsSummary> {
+    const fetchLimit = Math.max(options.top * 5, options.periodDays >= 90 ? 100 : 50);
+    const feed = await this.getFeed({ limit: fetchLimit, mine: true });
+    const cutoff = Date.now() - options.periodDays * 24 * 60 * 60 * 1000;
+    const filtered = feed.items.filter((item) => {
+      const timestamp = item.publishedAt ? Date.parse(item.publishedAt) : Number.NaN;
+      return Number.isNaN(timestamp) ? true : timestamp >= cutoff;
+    });
+    const topPosts = sortTopPosts(filtered).slice(0, options.top);
+    const totalReactions = filtered.reduce((sum, item) => sum + (item.likes ?? 0), 0);
+    const totalComments = filtered.reduce((sum, item) => sum + (item.comments ?? 0), 0);
+    const totalReposts = filtered.reduce((sum, item) => sum + (item.reposts ?? 0), 0);
+    const totalPosts = filtered.length;
+    const postingFrequencyPerWeek = totalPosts === 0 ? 0 : totalPosts / (options.periodDays / 7);
+
+    return {
+      period: `${options.periodDays}d`,
+      totalPosts,
+      totalImpressions: null,
+      totalReactions,
+      totalComments,
+      totalReposts,
+      averageEngagementRate: null,
+      postingFrequencyPerWeek,
+      bestPost: topPosts[0] ?? null,
+      topPosts,
+    };
+  }
+
   async getAnalytics(limit: number): Promise<AnalyticsSummary> {
     const feed = await this.getFeed({ limit, mine: true });
     const topPosts = sortTopPosts(feed.items).slice(0, Math.min(feed.items.length, 5));
@@ -1035,6 +1491,112 @@ export class VoyagerApi {
     const keywordSegment = options.keywords ? `keywords:${options.keywords},` : "";
 
     return `(start:${options.start},origin:${options.origin},query:(${keywordSegment}flagshipSearchIntent:SEARCH_SRP,queryParameters:List(${queryParameters.join(",")}),includeFiltersInResponse:false))`;
+  }
+
+  private async scrapeDeepProfilePage(profileUrl?: string): Promise<{
+    experience: ProfilePosition[];
+    education: ProfileEducation[];
+    skills: ProfileSkill[];
+    certifications: ProfileCertification[];
+    languages: ProfileLanguage[];
+    volunteerExperience: ProfileVolunteerExperience[];
+    publications: ProfilePublication[];
+    patents: ProfilePatent[];
+    featured: ProfileFeaturedItem[];
+    recommendationsGiven: { count: number; previews: string[] };
+    recommendationsReceived: { count: number; previews: string[] };
+    activity: { postsLast30Days: number };
+  }> {
+    const fallbackUrl = profileUrl ?? buildProfileUrl((await this.getStatus()).publicIdentifier);
+    const detailsUrl = fallbackUrl ? `${fallbackUrl.replace(/\/+$/, "")}/details/experience/` : "https://www.linkedin.com/";
+    const page = await this.client.openPage(detailsUrl);
+    await page.waitForTimeout(2500);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight * 0.4));
+    await page.waitForTimeout(1000);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(1000);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(500);
+
+    const scraped = await page.evaluate(() => {
+      const main = document.querySelector("main");
+      const sections = Array.from(main?.querySelectorAll("section") ?? []).map((section) => ({
+        heading: section.querySelector("h1, h2, h3")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+        lines: (section.innerText ?? "")
+          .split("\n")
+          .map((line: string) => line.replace(/\s+/g, " ").trim())
+          .filter((line: string) => Boolean(line) && line !== "·"),
+        links: Array.from(section.querySelectorAll("a[href]"))
+          .map((anchor) => (anchor as HTMLAnchorElement).href)
+          .filter(Boolean),
+      }));
+
+      return { sections };
+    });
+
+    const findSection = (...headings: string[]) =>
+      scraped.sections.find((section) => headings.some((heading) => section.heading.toLowerCase() === heading.toLowerCase()));
+
+    const experienceSection = findSection("Experience");
+    const educationSection = findSection("Education");
+    const skillsSection = findSection("Skills");
+    const certificationsSection = findSection("Licenses & certifications", "Licenses & Certifications");
+    const languagesSection = findSection("Languages");
+    const volunteerSection = findSection("Volunteer experience", "Volunteering");
+    const publicationsSection = findSection("Publications");
+    const patentsSection = findSection("Patents");
+    const recommendationsReceivedSection = findSection("Recommendations received");
+    const recommendationsGivenSection = findSection("Recommendations given");
+    const activitySection = findSection("Activity");
+    let featuredSection = findSection("Featured");
+    let activityLines = activitySection?.lines ?? [];
+
+    if ((activityLines.length === 0 || countRecentPostsFromLines(activityLines, 30) === 0 || !featuredSection) && fallbackUrl) {
+      await page.goto(fallbackUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(2000);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight * 0.4));
+      await page.waitForTimeout(1000);
+
+      const rootScraped = await page.evaluate(() => {
+        const main = document.querySelector("main");
+        return Array.from(main?.querySelectorAll("section") ?? []).map((section) => ({
+          heading: section.querySelector("h1, h2, h3")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+          lines: (section.innerText ?? "")
+            .split("\n")
+            .map((line: string) => line.replace(/\s+/g, " ").trim())
+            .filter((line: string) => Boolean(line) && line !== "·"),
+          links: Array.from(section.querySelectorAll("a[href]"))
+            .map((anchor) => (anchor as HTMLAnchorElement).href)
+            .filter(Boolean),
+        }));
+      });
+
+      const rootFindSection = (...headings: string[]) =>
+        rootScraped.find((section) => headings.some((heading) => section.heading.toLowerCase() === heading.toLowerCase()));
+
+      featuredSection = featuredSection ?? rootFindSection("Featured");
+      activityLines =
+        activityLines.length > 0 && countRecentPostsFromLines(activityLines, 30) > 0
+          ? activityLines
+          : rootFindSection("Activity")?.lines ?? [];
+    }
+
+    return {
+      experience: parseExperienceSection(experienceSection?.lines ?? []),
+      education: parseEducationSection(educationSection?.lines ?? []),
+      skills: parseSkillsSection(skillsSection?.lines ?? []),
+      certifications: parseCertificationSection(certificationsSection?.lines ?? []),
+      languages: parseLanguageSection(languagesSection?.lines ?? []),
+      volunteerExperience: parseVolunteerSection(volunteerSection?.lines ?? []),
+      publications: parsePublicationsSection(publicationsSection?.lines ?? []),
+      patents: parsePatentsSection(patentsSection?.lines ?? []),
+      featured: parseFeaturedSection(featuredSection?.lines ?? [], featuredSection?.links ?? []),
+      recommendationsGiven: parseRecommendationSection(recommendationsGivenSection?.lines ?? []),
+      recommendationsReceived: parseRecommendationSection(recommendationsReceivedSection?.lines ?? []),
+      activity: {
+        postsLast30Days: countRecentPostsFromLines(activityLines, 30),
+      },
+    };
   }
 
   private async scrapePublicProfile(identifier: string): Promise<ProfileSummary> {

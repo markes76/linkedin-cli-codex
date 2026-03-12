@@ -2,35 +2,62 @@ import type { Command } from "commander";
 
 import type { SearchVertical } from "../api/types.js";
 import { printJson } from "../output/json.js";
-import { printTable } from "../output/table.js";
+import { printSearchResultsTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
 import { getApiForCommand } from "./support.js";
 
 function registerSearchVertical(search: Command, vertical: SearchVertical, description: string): void {
-  search
-    .command(`${vertical} <query>`)
-    .description(description)
-    .action((query, _options, command) =>
-      runCommand(async () => {
-        const { context, api, close } = await getApiForCommand(command);
-        try {
-          const result = await api.search(vertical, query, withDefaultLimit(context.limit, 10));
+  const command = search.command(`${vertical} <query>`).description(description);
 
-          if (context.json) {
-            printJson(result);
-            return;
+  if (vertical === "people") {
+    command
+      .option("--company <company>", "Filter people results by current company")
+      .option("--title <title>", "Filter people results by current title")
+      .option("--location <location>", "Filter people results by location")
+      .action((query, options, commandInstance) =>
+        runCommand(async () => {
+          const { context, api, close } = await getApiForCommand(commandInstance);
+          try {
+            const result = await api.searchPeople({
+              company: options.company,
+              keywords: query,
+              limit: withDefaultLimit(context.limit, 10),
+              location: options.location,
+              title: options.title,
+            });
+
+            if (context.json) {
+              printJson(result);
+              return;
+            }
+
+            printSearchResultsTable(result.items);
+          } finally {
+            await close();
           }
+        }),
+      );
+    return;
+  }
 
-          printTable(
-            ["Title", "Subtitle", "Location", "URL"],
-            result.items.map((item) => [item.title, item.subtitle, item.location, item.url]),
-          );
-        } finally {
-          await close();
+  command.action((query, _options, commandInstance) =>
+    runCommand(async () => {
+      const { context, api, close } = await getApiForCommand(commandInstance);
+      try {
+        const result = await api.search(vertical, query, withDefaultLimit(context.limit, 10));
+
+        if (context.json) {
+          printJson(result);
+          return;
         }
-      }),
-    );
+
+        printSearchResultsTable(result.items);
+      } finally {
+        await close();
+      }
+    }),
+  );
 }
 
 export function registerSearchCommand(program: Command): void {

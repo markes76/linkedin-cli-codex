@@ -110,15 +110,18 @@ This clears both the saved session file and the CLI-only Playwright browser prof
 linkedin profile
 linkedin profile https://www.linkedin.com/in/some-person/
 linkedin profile --json
+linkedin profile --deep --json
 ```
 
 ### Connections
 
 ```bash
 linkedin connections
+linkedin connections list --company "Google" --title "engineer"
 linkedin connections --search "John"
 linkedin connections --count
 linkedin connections --recent
+linkedin connections export --format csv
 ```
 
 ### Feed and posts
@@ -153,6 +156,13 @@ linkedin network invitations --sent
 linkedin network suggestions
 ```
 
+### Content
+
+```bash
+linkedin content stats --period 30d
+linkedin content stats --period 90d --top 5 --json
+```
+
 ### Analytics
 
 ```bash
@@ -165,6 +175,7 @@ linkedin analytics --followers
 
 ```bash
 linkedin search people "AI engineer"
+linkedin search people "AI engineer" --title "senior" --location "Israel"
 linkedin search companies "cybersecurity"
 linkedin search jobs "product manager"
 linkedin search posts "enterprise AI"

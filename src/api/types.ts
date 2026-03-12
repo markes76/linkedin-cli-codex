@@ -11,6 +11,86 @@ export interface CommandContext {
   limit?: number;
 }
 
+export interface ProfilePosition {
+  title?: string;
+  company?: string;
+  location?: string;
+  startDate?: string;
+  endDate?: string;
+  duration?: string;
+  description?: string;
+}
+
+export interface ProfileEducation {
+  school?: string;
+  degree?: string;
+  fieldOfStudy?: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+}
+
+export interface ProfileSkill {
+  name: string;
+  endorsementsCount?: number;
+}
+
+export interface ProfileCertification {
+  name: string;
+  issuer?: string;
+  issuedAt?: string;
+  credentialId?: string;
+  credentialUrl?: string;
+}
+
+export interface ProfileLanguage {
+  name: string;
+  proficiency?: string;
+}
+
+export interface ProfileVolunteerExperience {
+  role?: string;
+  organization?: string;
+  cause?: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+}
+
+export interface ProfilePublication {
+  title: string;
+  publisher?: string;
+  publishedAt?: string;
+  description?: string;
+  url?: string;
+}
+
+export interface ProfilePatent {
+  title: string;
+  issuer?: string;
+  publishedAt?: string;
+  description?: string;
+  url?: string;
+}
+
+export interface ProfileFeaturedItem {
+  title: string;
+  subtitle?: string;
+  type?: string;
+  url?: string;
+}
+
+export interface ProfileRecommendationSummary {
+  count: number;
+  previews: string[];
+}
+
+export interface ProfileActivityStats {
+  followers?: number;
+  connections?: number;
+  postsLast30Days: number;
+}
+
 export interface PaginatedResult<T> {
   items: T[];
   count: number;
@@ -39,21 +119,22 @@ export interface ProfileSummary {
   profileUrl?: string;
   followers?: number;
   connections?: number;
-  experience?: Array<{
-    title?: string;
-    company?: string;
-    location?: string;
-    startDate?: string;
-    endDate?: string;
-  }>;
-  education?: Array<{
-    school?: string;
-    degree?: string;
-    fieldOfStudy?: string;
-    startDate?: string;
-    endDate?: string;
-  }>;
+  experience?: ProfilePosition[];
+  education?: ProfileEducation[];
   raw?: unknown;
+}
+
+export interface DeepProfileSummary extends ProfileSummary {
+  skills: ProfileSkill[];
+  certifications: ProfileCertification[];
+  languages: ProfileLanguage[];
+  volunteerExperience: ProfileVolunteerExperience[];
+  publications: ProfilePublication[];
+  patents: ProfilePatent[];
+  featured: ProfileFeaturedItem[];
+  recommendationsGiven: ProfileRecommendationSummary;
+  recommendationsReceived: ProfileRecommendationSummary;
+  activity: ProfileActivityStats;
 }
 
 export interface ConnectionSummary {
@@ -61,6 +142,9 @@ export interface ConnectionSummary {
   publicIdentifier?: string;
   fullName: string;
   headline?: string;
+  currentCompany?: string;
+  currentTitle?: string;
+  industry?: string;
   location?: string;
   profileUrl?: string;
   connectedAt?: string;
@@ -126,12 +210,32 @@ export interface SearchResultSummary {
   raw?: unknown;
 }
 
+export interface PeopleSearchResultSummary extends SearchResultSummary {
+  type: "people";
+  connectionDegree?: string;
+  currentCompany?: string;
+  currentTitle?: string;
+}
+
 export interface AnalyticsSummary {
   window: string;
   postsAnalyzed: number;
   totalLikes: number;
   totalComments: number;
   totalReposts: number;
+  topPosts: FeedItemSummary[];
+}
+
+export interface ContentStatsSummary {
+  period: string;
+  totalPosts: number;
+  totalImpressions: number | null;
+  totalReactions: number;
+  totalComments: number;
+  totalReposts: number;
+  averageEngagementRate: number | null;
+  postingFrequencyPerWeek: number;
+  bestPost: FeedItemSummary | null;
   topPosts: FeedItemSummary[];
 }
 
@@ -143,4 +247,3 @@ export interface JobSummary {
   url?: string;
   raw?: unknown;
 }
-

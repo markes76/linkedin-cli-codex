@@ -2,6 +2,7 @@ import { Command } from "commander";
 
 import { registerAnalyticsCommand } from "./commands/analytics.js";
 import { registerConnectionsCommand } from "./commands/connections.js";
+import { registerContentCommand } from "./commands/content.js";
 import { registerFeedCommand } from "./commands/feed.js";
 import { registerJobsCommand } from "./commands/jobs.js";
 import { registerLoginCommand } from "./commands/login.js";
@@ -37,6 +38,7 @@ registerStatusCommand(program);
 registerLogoutCommand(program);
 registerProfileCommand(program);
 registerConnectionsCommand(program);
+registerContentCommand(program);
 registerFeedCommand(program);
 registerMessagesCommand(program);
 registerNotificationsCommand(program);

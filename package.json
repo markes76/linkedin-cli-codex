@@ -38,6 +38,7 @@
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.0",
+    "csv-stringify": "^6.5.2",
     "playwright": "^1.52.0"
   },
   "devDependencies": {
@@ -46,4 +47,3 @@
     "typescript": "^5.8.3"
   }
 }
-
