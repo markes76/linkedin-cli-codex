@@ -5,7 +5,8 @@ import type { Command } from "commander";
 import type { ConnectionSummary } from "../api/types.js";
 import { toCsv } from "../output/csv.js";
 import { printJson } from "../output/json.js";
-import { printConnectionsTable, printKeyValue } from "../output/table.js";
+import { printConnectionsTable, printKeyValue, printMutualConnectionsTable } from "../output/table.js";
+import { parseLinkedInProfileIdentifier } from "../api/voyager.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
 import { getApiForCommand } from "./support.js";
@@ -140,6 +141,27 @@ export function registerConnectionsCommand(program: Command): void {
           }
 
           process.stdout.write(csv);
+        } finally {
+          await close();
+        }
+      }),
+    );
+
+  connections
+    .command("mutual <linkedinUrl>")
+    .description("List mutual connections between you and another LinkedIn member")
+    .action((linkedinUrl, _options, command) =>
+      runCommand(async () => {
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.getMutualConnections(parseLinkedInProfileIdentifier(linkedinUrl), withDefaultLimit(context.limit, 25));
+
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          printMutualConnectionsTable(result);
         } finally {
           await close();
         }

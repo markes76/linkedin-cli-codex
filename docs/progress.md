@@ -12,7 +12,7 @@ It records what has already been implemented, what has been verified, what is st
 The project is scaffolded, buildable, and published locally as a working package.
 
 Git status:
-- Latest pushed commit at time of writing: `3649e8b`
+- Latest pushed commit at time of writing: `d01278a`
 - Branch: `main`
 - Remote: `origin` -> `https://github.com/markes76/linkedin-cli-codex.git`
 
@@ -56,6 +56,14 @@ Reusable skill:
 - `linkedin content stats --period 30d`
 - `linkedin search people ... --title ... --location ...`
 
+### Phase 2 Features Now Added
+
+- `linkedin connections mutual <url-or-username>`
+- `linkedin network map`
+- `linkedin network viewers`
+- `linkedin company <url-or-name>`
+- `linkedin company <url-or-name> employees`
+
 ### Important Fixes Already Landed
 
 - Browser-backed requests now navigate to the requested LinkedIn page instead of reusing the wrong tab
@@ -68,6 +76,8 @@ Reusable skill:
 
 - `jobs saved`, `jobs applied`, and `jobs recommended` remain scaffold-level empty buckets
 - Some parsed outputs are still best-effort because LinkedIn DOM and Voyager responses are inconsistent
+- `connections mutual` depends on LinkedIn exposing a mutual-connections surface for the current account/profile pair
+- `company employees` is accurate enough to use, but title-filtered results can still be noisy because LinkedIn search ranking is inconsistent
 - We have not yet done a broad real-account validation pass
 - The CLI is still missing the larger Phase 1-5 command surface requested in the expanded spec
 
@@ -86,13 +96,21 @@ Reusable skill:
 - decide whether to trim very large `raw` payloads from search JSON output
 - add a short README update for the new Phase 1 command surface if we want docs parity
 
-### Phase 2
+### Phase 2 Cleanup
 
-- `linkedin connections mutual`
-- `linkedin network map`
-- `linkedin network viewers`
-- `linkedin company <url-or-name>`
-- `linkedin company <url-or-name> employees`
+- tighten `company employees` ranking and reduce noisy matches when title filters are broad
+- enrich `company` output with recent posts and better about-page fields
+- keep testing `connections mutual` on profiles where the dummy account can actually see shared links
+
+### Phase 3
+
+- `linkedin post <post-url> --comments --reactions`
+- `linkedin content search`
+- `linkedin content hashtags`
+- `linkedin jobs search`
+- `linkedin jobs detail`
+- `linkedin jobs saved`
+- `linkedin jobs applied`
 
 ### Shared Output Layer
 
@@ -123,8 +141,19 @@ After that, do a narrow real-account smoke test:
 - `src/auth/session.ts`
 - `src/commands/profile.ts`
 - `src/commands/connections.ts`
+- `src/commands/company.ts`
+- `src/commands/network.ts`
 - `src/commands/search.ts`
 - `docs/skill.md`
+
+## Verified In This Phase
+
+- `linkedin network viewers --json`
+- `linkedin network map --json`
+- `linkedin company Anthropic --json`
+- `linkedin company Anthropic employees --limit 5 --json`
+- `linkedin company Anthropic employees --title engineer --limit 3 --json`
+- `linkedin connections mutual https://www.linkedin.com/in/williamhgates/ --json`
 
 ## Update Rule
 

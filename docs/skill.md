@@ -59,6 +59,7 @@ linkedin connections --search "John" --json
 linkedin connections --count --json
 linkedin connections --recent --limit 20 --json
 linkedin connections export --format csv
+linkedin connections mutual https://www.linkedin.com/in/some-person/ --json
 ```
 
 - `linkedin connections`: lists first-degree connections.
@@ -67,6 +68,7 @@ linkedin connections export --format csv
 - `linkedin connections --count`: returns a connection count payload.
 - `linkedin connections --recent`: returns the same connection dataset, biased toward the newest page of results.
 - `linkedin connections export --format csv`: prints CSV to stdout.
+- `linkedin connections mutual <url-or-username>`: best-effort mutual connection lookup. If LinkedIn does not expose mutuals to the current account, expect `available: false` with a note instead of a crash.
 
 Useful fields:
 
@@ -159,11 +161,49 @@ Useful fields:
 linkedin network invitations --json
 linkedin network invitations --sent --json
 linkedin network suggestions --json
+linkedin network map --json
+linkedin network viewers --json
 ```
 
 - `linkedin network invitations`: pending received invites.
 - `linkedin network invitations --sent`: sent invitations.
 - `linkedin network suggestions`: people LinkedIn suggests you may know.
+- `linkedin network map`: summarizes sampled connections by company, industry, location, seniority, and recent growth buckets.
+- `linkedin network viewers`: returns recent profile viewers when LinkedIn exposes them, otherwise an `empty` or `restricted` availability payload.
+
+Useful fields:
+
+- `topCompanies`
+- `topLocations`
+- `seniorityBreakdown`
+- `growthLast6Months`
+- `availability`
+- `message`
+
+## Company commands
+
+```bash
+linkedin company "Anthropic" --json
+linkedin company "Anthropic" employees --limit 20 --json
+linkedin company "Anthropic" employees --title "engineer" --json
+```
+
+- `linkedin company <url-or-name>`: resolves a company through LinkedIn search, then scrapes the company about page.
+- `linkedin company <url-or-name> employees`: returns associated employees, preferring a current-company search filter when LinkedIn exposes one.
+
+Useful fields:
+
+- `name`
+- `description`
+- `industry`
+- `website`
+- `followers`
+- `employeeCount`
+- `employeesSearchUrl`
+- `items[].fullName`
+- `items[].title`
+- `items[].location`
+- `items[].connectionDegree`
 
 ## Analytics commands
 
@@ -226,6 +266,7 @@ These commands are scaffolded for future Voyager endpoint coverage. Expect empty
 - "How are my posts performing?" -> `linkedin content stats --period 30d --json`
 - "Who do I know at Google?" -> `linkedin connections list --company "Google" --json`
 - "Export my connections to CSV" -> `linkedin connections export --format csv`
+- "Who are the mutual connections between me and X?" -> `linkedin connections mutual <url> --json`
 - "Find AI engineers in my network" -> `linkedin search people "AI engineer" --json`
 - "Find senior AI engineers in Israel" -> `linkedin search people "AI engineer" --title "senior" --location "Israel" --json`
 - "What are my unread messages?" -> `linkedin messages --unread --json`
@@ -233,6 +274,10 @@ These commands are scaffolded for future Voyager endpoint coverage. Expect empty
 - "Pull my profile summary" -> `linkedin profile --json`
 - "Search LinkedIn for cybersecurity companies" -> `linkedin search companies "cybersecurity" --json`
 - "Show my pending invitations" -> `linkedin network invitations --json`
+- "Give me a network breakdown" -> `linkedin network map --json`
+- "Who viewed my profile recently?" -> `linkedin network viewers --json`
+- "What's the company info for Anthropic?" -> `linkedin company "Anthropic" --json`
+- "Show me Anthropic employees" -> `linkedin company "Anthropic" employees --json`
 
 ## Combining commands for complex queries
 
@@ -248,6 +293,8 @@ Examples:
 
 - Relationship snapshot: combine `linkedin profile --json` with `linkedin connections --count --json`.
 - Deep person brief: combine `linkedin profile <linkedin-url> --deep --json` with `linkedin connections list --search "<name>" --json`.
+- Networking prep: combine `linkedin profile <linkedin-url> --deep --json` with `linkedin connections mutual <linkedin-url> --json`.
+- Company intelligence: combine `linkedin company "<name>" --json` with `linkedin company "<name>" employees --json`.
 - Content health: combine `linkedin feed --mine --stats --json` with `linkedin analytics --json`.
 - Phase 1 content check: combine `linkedin content stats --period 30d --json` with `linkedin feed --mine --stats --json`.
 - Inbox triage: combine `linkedin messages --unread --json` with `linkedin notifications --unread --json`.

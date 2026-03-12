@@ -122,6 +122,7 @@ linkedin connections --search "John"
 linkedin connections --count
 linkedin connections --recent
 linkedin connections export --format csv
+linkedin connections mutual https://www.linkedin.com/in/some-person/
 ```
 
 ### Feed and posts
@@ -154,6 +155,16 @@ linkedin notifications --unread
 linkedin network invitations
 linkedin network invitations --sent
 linkedin network suggestions
+linkedin network map
+linkedin network viewers
+```
+
+### Company
+
+```bash
+linkedin company "Anthropic"
+linkedin company "Anthropic" employees
+linkedin company "Anthropic" employees --title "engineer"
 ```
 
 ### Content

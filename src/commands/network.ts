@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 
 import { printJson } from "../output/json.js";
-import { printTable } from "../output/table.js";
+import { printNetworkMapSummary, printProfileViewersTable, printTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { runCommand } from "../utils/errors.js";
 import { getApiForCommand } from "./support.js";
@@ -55,6 +55,48 @@ export function registerNetworkCommand(program: Command): void {
             ["Name", "Headline", "Profile"],
             result.items.map((item) => [item.fullName, item.headline, item.profileUrl]),
           );
+        } finally {
+          await close();
+        }
+      }),
+    );
+
+  network
+    .command("map")
+    .description("Summarize your network by company, location, industry, and seniority")
+    .action((_options, command) =>
+      runCommand(async () => {
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.getNetworkMap(withDefaultLimit(context.limit, 250));
+
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          printNetworkMapSummary(result);
+        } finally {
+          await close();
+        }
+      }),
+    );
+
+  network
+    .command("viewers")
+    .description("View recent profile viewers when LinkedIn exposes them")
+    .action((_options, command) =>
+      runCommand(async () => {
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.getProfileViewers(withDefaultLimit(context.limit, 20));
+
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          printProfileViewersTable(result);
         } finally {
           await close();
         }

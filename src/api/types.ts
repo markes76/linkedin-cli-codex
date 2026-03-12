@@ -151,6 +151,58 @@ export interface ConnectionSummary {
   raw?: unknown;
 }
 
+export interface MutualConnectionsSummary {
+  target: {
+    fullName?: string;
+    profileUrl?: string;
+    publicIdentifier?: string;
+  };
+  items: ConnectionSummary[];
+  total: number;
+  available: boolean;
+  note?: string;
+}
+
+export interface CountBreakdown {
+  name: string;
+  count: number;
+}
+
+export interface NetworkGrowthBucket {
+  month: string;
+  count: number;
+}
+
+export interface SeniorityBreakdown extends CountBreakdown {
+  score: number;
+}
+
+export interface NetworkMapSummary {
+  totalConnections: number;
+  sampledConnections: number;
+  topCompanies: CountBreakdown[];
+  topIndustries: CountBreakdown[];
+  topLocations: CountBreakdown[];
+  seniorityBreakdown: SeniorityBreakdown[];
+  averageSeniorityScore: number | null;
+  averageSeniorityLevel?: string;
+  growthLast6Months: NetworkGrowthBucket[];
+}
+
+export interface ProfileViewerSummary {
+  fullName?: string;
+  headline?: string;
+  company?: string;
+  profileUrl?: string;
+  viewedAtLabel?: string;
+  raw?: unknown;
+}
+
+export interface ProfileViewersResult extends PaginatedResult<ProfileViewerSummary> {
+  availability: "available" | "empty" | "restricted";
+  message?: string;
+}
+
 export interface FeedItemSummary {
   id?: string;
   actorName?: string;
@@ -194,6 +246,39 @@ export interface NetworkSuggestionSummary {
   fullName?: string;
   headline?: string;
   profileUrl?: string;
+  raw?: unknown;
+}
+
+export interface CompanyPostSummary {
+  text?: string;
+  publishedAt?: string;
+  url?: string;
+}
+
+export interface CompanyProfileSummary {
+  id?: string;
+  name: string;
+  description?: string;
+  industry?: string;
+  website?: string;
+  followers?: number;
+  employeeCount?: string;
+  headquarters?: string;
+  foundedYear?: number;
+  specialties: string[];
+  url?: string;
+  jobsCount?: number;
+  employeesSearchUrl?: string;
+  recentPosts: CompanyPostSummary[];
+  raw?: unknown;
+}
+
+export interface CompanyEmployeeSummary {
+  fullName: string;
+  title?: string;
+  location?: string;
+  profileUrl?: string;
+  connectionDegree?: string;
   raw?: unknown;
 }
 

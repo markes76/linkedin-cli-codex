@@ -1,15 +1,23 @@
 import type {
   AnalyticsSummary,
+  CompanyEmployeeSummary,
+  CompanyProfileSummary,
   ConnectionSummary,
+  CountBreakdown,
   ContentStatsSummary,
   DeepProfileSummary,
   FeedItemSummary,
   InvitationSummary,
   JobSummary,
   MessageSummary,
+  MutualConnectionsSummary,
+  NetworkGrowthBucket,
+  NetworkMapSummary,
   NetworkSuggestionSummary,
   NotificationSummary,
   PaginatedResult,
+  ProfileViewerSummary,
+  ProfileViewersResult,
   ProfileSummary,
   ProfileEducation,
   ProfileFeaturedItem,
@@ -23,6 +31,7 @@ import type {
   PeopleSearchResultSummary,
   SearchResultSummary,
   SearchVertical,
+  SeniorityBreakdown,
   StatusSummary,
 } from "./types.js";
 import { paginate } from "../utils/pagination.js";
@@ -761,6 +770,167 @@ function parseSuggestion(item: unknown): NetworkSuggestionSummary | null {
   };
 }
 
+function topBreakdown(values: Array<string | undefined>, limit = 10): CountBreakdown[] {
+  const counts = new Map<string, number>();
+
+  for (const value of values) {
+    const normalized = normalizeLine(value ?? "");
+    if (!normalized) {
+      continue;
+    }
+
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count }));
+}
+
+function extractCompanyFromHeadline(headline?: string): string | undefined {
+  return splitHeadlineRole(headline).currentCompany;
+}
+
+function classifySeniority(title?: string): SeniorityBreakdown | null {
+  const normalized = normalizeLine(title ?? "").toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (/\b(founder|co-founder|cofounder|chief|ceo|cto|cfo|coo|cmo|president|owner|partner)\b/.test(normalized)) {
+    return { name: "Executive", count: 1, score: 6 };
+  }
+
+  if (/\b(vp|vice president|head of)\b/.test(normalized)) {
+    return { name: "VP", count: 1, score: 5 };
+  }
+
+  if (/\b(director|principal)\b/.test(normalized)) {
+    return { name: "Director", count: 1, score: 4 };
+  }
+
+  if (/\b(manager|lead)\b/.test(normalized)) {
+    return { name: "Manager", count: 1, score: 3 };
+  }
+
+  if (/\b(senior|sr\.?|staff|specialist|consultant)\b/.test(normalized)) {
+    return { name: "Senior IC", count: 1, score: 2 };
+  }
+
+  if (/\b(intern|student|assistant|junior|jr\.?)\b/.test(normalized)) {
+    return { name: "Entry", count: 1, score: 0 };
+  }
+
+  return { name: "IC", count: 1, score: 1 };
+}
+
+function mergeSeniority(items: Array<SeniorityBreakdown | null>): SeniorityBreakdown[] {
+  const counts = new Map<string, SeniorityBreakdown>();
+
+  for (const item of items) {
+    if (!item) {
+      continue;
+    }
+
+    const existing = counts.get(item.name);
+    if (existing) {
+      existing.count += item.count;
+      continue;
+    }
+
+    counts.set(item.name, { ...item });
+  }
+
+  return [...counts.values()].sort((left, right) => right.score - left.score);
+}
+
+function seniorityLabelFromAverage(score: number | null): string | undefined {
+  if (score === null) {
+    return undefined;
+  }
+
+  if (score >= 5.5) {
+    return "Executive";
+  }
+
+  if (score >= 4.5) {
+    return "VP";
+  }
+
+  if (score >= 3.5) {
+    return "Director";
+  }
+
+  if (score >= 2.5) {
+    return "Manager";
+  }
+
+  if (score >= 1.5) {
+    return "Senior IC";
+  }
+
+  if (score >= 0.5) {
+    return "IC";
+  }
+
+  return "Entry";
+}
+
+function buildLast6MonthsBuckets(now = new Date()): NetworkGrowthBucket[] {
+  return Array.from({ length: 6 }, (_value, index) => {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (5 - index), 1));
+    return {
+      month: date.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
+      count: 0,
+    };
+  });
+}
+
+function fillGrowthBuckets(connectedAtValues: Array<string | undefined>): NetworkGrowthBucket[] {
+  const buckets = buildLast6MonthsBuckets();
+  const bucketIndex = new Map(buckets.map((bucket, index) => [bucket.month, index]));
+
+  for (const value of connectedAtValues) {
+    if (!value) {
+      continue;
+    }
+
+    const parsed = Date.parse(value);
+    if (Number.isNaN(parsed)) {
+      continue;
+    }
+
+    const label = new Date(parsed).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+    const index = bucketIndex.get(label);
+    if (index !== undefined) {
+      buckets[index]!.count += 1;
+    }
+  }
+
+  return buckets;
+}
+
+function parseCountRange(line: string | undefined): number | undefined {
+  const normalized = normalizeLine(line ?? "");
+  if (!normalized) {
+    return undefined;
+  }
+
+  const match = normalized.match(/(\d[\d,.]*)([KMB])?\s+followers?/i);
+  if (!match) {
+    return undefined;
+  }
+
+  const base = Number.parseFloat((match[1] ?? "0").replace(/,/g, ""));
+  if (!Number.isFinite(base)) {
+    return undefined;
+  }
+
+  const multiplier = match[2]?.toUpperCase() === "K" ? 1_000 : match[2]?.toUpperCase() === "M" ? 1_000_000 : match[2]?.toUpperCase() === "B" ? 1_000_000_000 : 1;
+  return Math.round(base * multiplier);
+}
+
 function sortTopPosts(items: FeedItemSummary[]): FeedItemSummary[] {
   return [...items].sort((left, right) => {
     const leftScore = (left.likes ?? 0) + (left.comments ?? 0) + (left.reposts ?? 0);
@@ -1162,6 +1332,52 @@ export class VoyagerApi {
     };
   }
 
+  async getMutualConnections(identifier: string, limit: number): Promise<MutualConnectionsSummary> {
+    const normalized = parseLinkedInProfileIdentifier(identifier);
+    const profile = await this.getProfile(normalized).catch(() => ({
+      fullName: normalized,
+      profileUrl: buildProfileUrl(normalized),
+      publicIdentifier: normalized,
+    } as ProfileSummary));
+    const scraped = await this.scrapeMutualConnectionsPage(profile.profileUrl ?? buildProfileUrl(normalized) ?? normalized, limit);
+
+    return {
+      target: {
+        fullName: profile.fullName,
+        profileUrl: profile.profileUrl,
+        publicIdentifier: profile.publicIdentifier,
+      },
+      items: scraped.items,
+      total: scraped.total,
+      available: scraped.available,
+      note: scraped.note,
+    };
+  }
+
+  async getNetworkMap(limit: number): Promise<NetworkMapSummary> {
+    const result = await this.getConnections({ limit, recent: false });
+    const seniority = mergeSeniority(result.items.map((item) => classifySeniority(item.currentTitle ?? item.headline)));
+    const scoredItems = seniority.reduce((sum, item) => sum + item.score * item.count, 0);
+    const scoredCount = seniority.reduce((sum, item) => sum + item.count, 0);
+    const averageSeniorityScore = scoredCount > 0 ? scoredItems / scoredCount : null;
+
+    return {
+      totalConnections: result.total ?? result.items.length,
+      sampledConnections: result.items.length,
+      topCompanies: topBreakdown(result.items.map((item) => item.currentCompany ?? extractCompanyFromHeadline(item.headline))),
+      topIndustries: topBreakdown(result.items.map((item) => item.industry)),
+      topLocations: topBreakdown(result.items.map((item) => item.location)),
+      seniorityBreakdown: seniority,
+      averageSeniorityScore,
+      averageSeniorityLevel: seniorityLabelFromAverage(averageSeniorityScore),
+      growthLast6Months: fillGrowthBuckets(result.items.map((item) => item.connectedAt)),
+    };
+  }
+
+  async getProfileViewers(limit: number): Promise<ProfileViewersResult> {
+    return this.scrapeProfileViewersPage(limit);
+  }
+
   async getFeed(options: {
     limit: number;
     mine?: boolean;
@@ -1307,6 +1523,70 @@ export class VoyagerApi {
 
   async getSuggestions(limit: number): Promise<PaginatedResult<NetworkSuggestionSummary>> {
     return this.scrapeSuggestions(limit);
+  }
+
+  async getCompanyProfile(identifier: string): Promise<CompanyProfileSummary> {
+    const company = await this.resolveCompanyTarget(identifier);
+    return this.scrapeCompanyProfilePage(company.url, company.searchResult);
+  }
+
+  async getCompanyEmployees(
+    identifier: string,
+    options: {
+      limit: number;
+      title?: string;
+    },
+  ): Promise<PaginatedResult<CompanyEmployeeSummary>> {
+    const company = await this.resolveCompanyTarget(identifier);
+
+    if (company.companyId) {
+      try {
+        const variables = this.buildSearchVariables({
+          count: options.limit,
+          keywords: options.title,
+          origin: "COMPANY_PAGE_CANNED_SEARCH",
+          start: 0,
+          vertical: "people",
+          queryParameters: [
+            {
+              key: "currentCompany",
+              values: [company.companyId],
+            },
+          ],
+        });
+        const data = await this.client.getJson<unknown>(
+          `/graphql?includeWebMetadata=true&variables=${variables}&queryId=${SEARCH_CLUSTERS_QUERY_ID}`,
+        );
+
+        const items = extractElements(data)
+          .map((item) => parseSearchResult("people", item))
+          .filter((item): item is PeopleSearchResultSummary => item?.type === "people")
+          .map((item) => ({
+            fullName: item.title,
+            title: item.currentTitle ?? item.subtitle,
+            location: item.location,
+            profileUrl: item.url,
+            connectionDegree: item.connectionDegree,
+            raw: item.raw,
+          }))
+          .filter((item) => !options.title || item.title?.toLowerCase().includes(options.title.toLowerCase()))
+          .slice(0, options.limit);
+
+        if (items.length > 0) {
+          return {
+            items,
+            start: 0,
+            count: items.length,
+            total: extractTotal(data) ?? items.length,
+            nextStart: undefined,
+          };
+        }
+      } catch {
+        // Fall back to the company people page scrape when the structured search filter is unavailable.
+      }
+    }
+
+    return this.scrapeCompanyEmployeesPage(company.url, options.limit, options.title);
   }
 
   async search(vertical: SearchVertical, keywords: string, limit: number): Promise<PaginatedResult<SearchResultSummary>> {
@@ -1483,14 +1763,384 @@ export class VoyagerApi {
     origin: string;
     start: number;
     vertical: SearchVertical;
+    queryParameters?: Array<{
+      key: string;
+      values: string[];
+    }>;
   }): string {
     const queryParameters = [
       ...(options.network ? [`(key:network,value:List(${options.network}))`] : []),
       `(key:resultType,value:List(${this.resultTypeForVertical(options.vertical)}))`,
+      ...(options.queryParameters ?? []).map(
+        (parameter) => `(key:${parameter.key},value:List(${parameter.values.map((value) => encodeURIComponent(value)).join(",")}))`,
+      ),
     ];
     const keywordSegment = options.keywords ? `keywords:${options.keywords},` : "";
 
     return `(start:${options.start},origin:${options.origin},query:(${keywordSegment}flagshipSearchIntent:SEARCH_SRP,queryParameters:List(${queryParameters.join(",")}),includeFiltersInResponse:false))`;
+  }
+
+  private async resolveCompanyTarget(input: string): Promise<{
+    companyId?: string;
+    searchResult?: SearchResultSummary;
+    url: string;
+  }> {
+    const trimmed = input.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      const url = new URL(trimmed);
+      const segments = url.pathname.split("/").filter(Boolean);
+      const slug = segments[0] === "company" ? segments[1] : undefined;
+      return {
+        companyId: undefined,
+        url: slug ? `https://www.linkedin.com/company/${slug}/` : trimmed,
+      };
+    }
+
+    const search = await this.search("companies", trimmed, 5);
+    const normalizedQuery = trimmed.toLowerCase();
+    const match =
+      search.items.find((item) => item.title.toLowerCase() === normalizedQuery) ??
+      search.items.find((item) => item.title.toLowerCase().startsWith(normalizedQuery)) ??
+      search.items[0];
+
+    if (!match?.url) {
+      throw new Error(`Could not resolve a LinkedIn company for "${input}".`);
+    }
+
+    return {
+      companyId: match.id,
+      searchResult: match,
+      url: match.url,
+    };
+  }
+
+  private async scrapeMutualConnectionsPage(
+    profileUrl: string,
+    limit: number,
+  ): Promise<{ items: ConnectionSummary[]; total: number; available: boolean; note?: string }> {
+    const page = await this.client.openPage(profileUrl);
+    await page.waitForTimeout(2500);
+
+    const data = await page.evaluate(async (maxItems) => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const main = document.querySelector("main");
+      const allLinks = Array.from(main?.querySelectorAll('a[href]') ?? []) as HTMLAnchorElement[];
+      const mutualLink = allLinks.find((anchor) => /mutual|shared/i.test(`${anchor.textContent ?? ""} ${anchor.href}`));
+
+      if (!mutualLink) {
+        return {
+          available: false,
+          note: "No mutual-connections link is visible for this profile on the current account.",
+          items: [],
+          total: 0,
+        };
+      }
+
+      window.location.href = mutualLink.href;
+      return new Promise<{
+        available: boolean;
+        items: Array<{ fullName?: string; headline?: string; location?: string; profileUrl?: string }>;
+        total: number;
+        note?: string;
+      }>((resolve) => {
+        setTimeout(() => {
+          const profileLinks = Array.from(document.querySelectorAll('a[href*="/in/"]')) as HTMLAnchorElement[];
+          const seen = new Set<string>();
+          const items: Array<{ fullName?: string; headline?: string; location?: string; profileUrl?: string }> = [];
+
+          for (const anchor of profileLinks) {
+            const profileHref = anchor.href.split("?")[0];
+            if (seen.has(profileHref)) {
+              continue;
+            }
+
+            const container = anchor.closest("li, article, div");
+            const lines = (container?.textContent ?? anchor.textContent ?? "")
+              .split("\n")
+              .map(normalize)
+              .filter(Boolean);
+
+            const fullName = lines[0];
+            const headline = lines.find((line, index) => index > 0 && line !== fullName && !/^(connect|message|follow)$/i.test(line));
+            const location = lines.find(
+              (line, index) => index > 1 && line !== fullName && line !== headline && !/^(connect|message|follow)$/i.test(line),
+            );
+
+            if (!fullName) {
+              continue;
+            }
+
+            seen.add(profileHref);
+            items.push({
+              fullName,
+              headline,
+              location,
+              profileUrl: profileHref,
+            });
+
+            if (items.length >= maxItems) {
+              break;
+            }
+          }
+
+          resolve({
+            available: items.length > 0,
+            items,
+            total: items.length,
+            note: items.length > 0 ? undefined : "LinkedIn did not expose mutual connection cards for this profile.",
+          });
+        }, 2500);
+      });
+    }, limit);
+
+    return {
+      available: data.available,
+      items: data.items.map((item) => ({
+        fullName: item.fullName ?? "Unknown member",
+        headline: item.headline,
+        location: item.location,
+        profileUrl: item.profileUrl,
+      })),
+      total: data.total,
+      note: data.note,
+    };
+  }
+
+  private async scrapeProfileViewersPage(limit: number): Promise<ProfileViewersResult> {
+    const page = await this.client.openPage("https://www.linkedin.com/analytics/profile-views/");
+    await page.waitForTimeout(2500);
+
+    const scraped = await page.evaluate((maxItems) => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const main = document.querySelector("main");
+      const lines = (main?.innerText ?? "")
+        .split("\n")
+        .map(normalize)
+        .filter(Boolean);
+
+      const emptyMessage = lines.find((line) => /no profile views/i.test(line));
+      const restrictedMessage = lines.find((line) => /premium|subscription|see who's viewed/i.test(line));
+      const profileLinks = Array.from(main?.querySelectorAll('a[href*="/in/"]') ?? []) as HTMLAnchorElement[];
+      const seen = new Set<string>();
+      const items: Array<{ fullName?: string; headline?: string; company?: string; profileUrl?: string; viewedAtLabel?: string }> = [];
+
+      for (const anchor of profileLinks) {
+        const profileUrl = anchor.href.split("?")[0];
+        if (seen.has(profileUrl)) {
+          continue;
+        }
+
+        const container = anchor.closest("li, article, div");
+        const itemLines = (container?.textContent ?? anchor.textContent ?? "")
+          .split("\n")
+          .map(normalize)
+          .filter(Boolean);
+        const fullName = itemLines[0];
+        const viewedAtLabel = itemLines.find((line) => /^\d+\s+(hours?|days?|weeks?|months?)\b/i.test(line) || /^\d+[hdwm]\b/i.test(line));
+        const headline = itemLines.find(
+          (line, index) => index > 0 && line !== fullName && line !== viewedAtLabel && !/^(follow|connect|message|premium)$/i.test(line),
+        );
+        const company = headline?.includes(" at ") ? headline.split(/\s+at\s+/i)[1] : undefined;
+
+        if (!fullName) {
+          continue;
+        }
+
+        seen.add(profileUrl);
+        items.push({
+          fullName,
+          headline,
+          company,
+          profileUrl,
+          viewedAtLabel,
+        });
+
+        if (items.length >= maxItems) {
+          break;
+        }
+      }
+
+      const availability: "available" | "empty" | "restricted" =
+        items.length > 0 ? "available" : emptyMessage ? "empty" : restrictedMessage ? "restricted" : "empty";
+
+      return {
+        availability,
+        items,
+        message:
+          emptyMessage ??
+          restrictedMessage ??
+          (items.length === 0 ? "LinkedIn did not expose any recent profile viewers for this account." : undefined),
+      };
+    }, limit);
+
+    return {
+      items: scraped.items.map((item) => ({
+        fullName: item.fullName,
+        headline: item.headline,
+        company: item.company,
+        profileUrl: item.profileUrl,
+        viewedAtLabel: item.viewedAtLabel,
+      })),
+      start: 0,
+      count: scraped.items.length,
+      total: scraped.items.length,
+      nextStart: undefined,
+      availability: scraped.availability,
+      message: scraped.message,
+    };
+  }
+
+  private async scrapeCompanyProfilePage(url: string, searchResult?: SearchResultSummary): Promise<CompanyProfileSummary> {
+    const normalizedUrl = url.replace(/\/+$/, "");
+    const page = await this.client.openPage(`${normalizedUrl}/about/`);
+    await page.waitForTimeout(2500);
+
+    const scraped = await page.evaluate(() => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const main = document.querySelector("main");
+      const sections = Array.from(main?.querySelectorAll("section") ?? []).map((section) => ({
+        heading: section.querySelector("h1, h2, h3")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+        lines: (section.textContent ?? "")
+          .split("\n")
+          .map(normalize)
+          .filter(Boolean),
+        links: Array.from(section.querySelectorAll("a[href]")).map((anchor) => ({
+          href: (anchor as HTMLAnchorElement).href,
+          text: normalize(anchor.textContent ?? ""),
+        })),
+      }));
+      const lines = (main?.textContent ?? "")
+        .split("\n")
+        .map(normalize)
+        .filter(Boolean);
+      const websiteLink = Array.from(main?.querySelectorAll('a[href^="http"]') ?? [])
+        .map((anchor) => (anchor as HTMLAnchorElement).href)
+        .find((href) => !href.includes("linkedin.com"));
+      const employeesSearchUrl = Array.from(main?.querySelectorAll('a[href*="/search/results/people/?currentCompany="]') ?? [])
+        .map((anchor) => (anchor as HTMLAnchorElement).href)[0];
+
+      return {
+        companyUrl: location.href,
+        lines,
+        sections,
+        websiteLink,
+        employeesSearchUrl,
+      };
+    });
+
+    const pickValue = (label: string): string | undefined => {
+      const index = scraped.lines.findIndex((line) => line.toLowerCase() === label.toLowerCase());
+      return index >= 0 ? scraped.lines[index + 1] : undefined;
+    };
+
+    const headerLine = scraped.lines.find((line) => /followers?/i.test(line) && /employees?/i.test(line));
+    const name =
+      scraped.sections.find((section) => Boolean(section.heading))?.heading ??
+      searchResult?.title ??
+      scraped.lines[0] ??
+      "Company";
+    const description =
+      pickValue("Overview") ??
+      searchResult?.snippet ??
+      scraped.lines.find((line) => line.length > 40 && !/followers?|employees?/i.test(line));
+    const specialtiesLine = pickValue("Specialties");
+    const foundedLine = pickValue("Founded");
+    const jobsLine = scraped.lines.find((line) => /\d[\d,]*\s+jobs/i.test(line));
+
+    return {
+      id: searchResult?.id,
+      name,
+      description,
+      industry: pickValue("Industry") ?? searchResult?.subtitle,
+      website: pickValue("Website") ?? scraped.websiteLink,
+      followers: parseCountRange(headerLine) ?? parseCountRange(searchResult?.location),
+      employeeCount: pickValue("Company size") ?? headerLine?.match(/\d[\d,]*\s*-\s*\d[\d,]*\s+employees/i)?.[0],
+      headquarters: pickValue("Headquarters"),
+      foundedYear: numberValue(foundedLine),
+      specialties: specialtiesLine ? specialtiesLine.split(/,\s*/).map((item) => item.trim()).filter(Boolean) : [],
+      url: normalizedUrl.endsWith("/about") ? normalizedUrl.replace(/\/about$/, "") : normalizedUrl,
+      jobsCount: numberValue(jobsLine),
+      employeesSearchUrl: scraped.employeesSearchUrl,
+      recentPosts: [],
+      raw: {
+        searchResult,
+        scraped,
+      },
+    };
+  }
+
+  private async scrapeCompanyEmployeesPage(
+    url: string,
+    limit: number,
+    title?: string,
+  ): Promise<PaginatedResult<CompanyEmployeeSummary>> {
+    const page = await this.client.openPage(`${url.replace(/\/+$/, "")}/people/`);
+    await page.waitForTimeout(2500);
+
+    const scraped = await page.evaluate(
+      ({ maxItems, titleQuery }: { maxItems: number; titleQuery?: string }) => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const lowerTitleQuery = titleQuery?.toLowerCase() ?? "";
+      const profileLinks = Array.from(document.querySelectorAll('a[href*="/in/"]')) as HTMLAnchorElement[];
+      const seen = new Set<string>();
+      const items: Array<{ fullName?: string; title?: string; location?: string; profileUrl?: string }> = [];
+
+      for (const anchor of profileLinks) {
+        const profileUrl = anchor.href.split("?")[0];
+        if (seen.has(profileUrl)) {
+          continue;
+        }
+
+        const container = anchor.closest("li, article, div");
+        const lines = (container?.textContent ?? anchor.textContent ?? "")
+          .split("\n")
+          .map(normalize)
+          .filter(Boolean)
+          .filter((line, index, all) => all.indexOf(line) === index);
+        const fullName = lines[0];
+        const headline = lines.find((line, index) => index > 0 && line !== fullName && !/^(connect|follow|message)$/i.test(line));
+        const location = lines.find(
+          (line, index) =>
+            index > 1 &&
+            line !== fullName &&
+            line !== headline &&
+            !/^(connect|follow|message|people you may know)$/i.test(line),
+        );
+
+        if (!fullName || (lowerTitleQuery && !(headline ?? "").toLowerCase().includes(lowerTitleQuery))) {
+          continue;
+        }
+
+        seen.add(profileUrl);
+        items.push({
+          fullName,
+          title: headline,
+          location,
+          profileUrl,
+        });
+
+        if (items.length >= maxItems) {
+          break;
+        }
+      }
+
+      return items;
+      },
+      { maxItems: limit, titleQuery: title },
+    );
+
+    return {
+      items: scraped.map((item) => ({
+        fullName: item.fullName ?? "Unknown member",
+        title: item.title,
+        location: item.location,
+        profileUrl: item.profileUrl,
+      })),
+      start: 0,
+      count: scraped.length,
+      total: scraped.length,
+      nextStart: undefined,
+    };
   }
 
   private async scrapeDeepProfilePage(profileUrl?: string): Promise<{
