@@ -23,7 +23,8 @@ Reusable skill:
 Release state:
 - `v0.1.1` exists on GitHub with uploaded release assets
 - the release workflow only failed on npm publish because `NPM_TOKEN` was not configured
-- package version has now been bumped to `0.1.2` and the release workflow has been updated to skip npm publish gracefully when no npm token is present
+- the first `v0.1.2` attempt exposed a workflow-expression issue before jobs even started
+- package version has now been bumped to `0.1.3` and the release workflow has been updated to skip npm publish gracefully inside the shell step when no npm token is present
 
 ## Working Today
 
