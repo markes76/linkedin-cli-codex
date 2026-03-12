@@ -217,6 +217,11 @@ linkedin jobs recommended
 
 The bundled skill is designed for agent tooling to discover commands, map natural language requests to CLI invocations, and default to JSON output.
 
+The skill is distributed in three places:
+- source of truth: [`docs/skill.md`](./docs/skill.md)
+- npm package: bundled inside `linkedin-cli`
+- GitHub releases: downloadable `linkedin-skill.zip` on tagged releases
+
 ### Claude Code
 
 ```bash
@@ -235,6 +240,15 @@ The install command writes:
 ### Claude Desktop
 
 Use the contents of [`docs/skill.md`](./docs/skill.md) as the tool instruction reference in your local wrapper or MCP bridge.
+
+### GitHub release asset
+
+Tagged releases publish two downloadable artifacts:
+
+- `linkedin-cli-<version>.tgz`
+- `linkedin-skill.zip`
+
+This is the recommended GitHub-side distribution path for the skill instead of publishing it as a separate GitHub Package.
 
 ### OpenClaw
 
