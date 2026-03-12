@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 
 import { printJson } from "../output/json.js";
-import { printKeyValue, printTable } from "../output/table.js";
+import { printKeyValue, printPostDetailSummary, printTable } from "../output/table.js";
 import { withDefaultLimit } from "../utils/command.js";
 import { CliError, runCommand } from "../utils/errors.js";
 import { getApiForCommand } from "./support.js";
@@ -40,14 +40,20 @@ export function registerFeedCommand(program: Command): void {
       }),
     );
 
-  program
-    .command("posts <postUrl>")
-    .description("Get analytics for a specific post URL")
-    .action((postUrl, _options, command) =>
+  const registerPostCommand = (name: string, description: string) =>
+    program
+      .command(`${name} <postUrl>`)
+      .description(description)
+      .option("--comments", "Include top-level comments")
+      .option("--reactions", "Include reaction totals and breakdown when available")
+      .action((postUrl, options, command) =>
       runCommand(async () => {
         const { context, api, close } = await getApiForCommand(command);
         try {
-          const post = await api.getAnalyticsForPost(postUrl, withDefaultLimit(context.limit, 50));
+          const post = await api.getPostDetails(postUrl, {
+            comments: Boolean(options.comments),
+            reactions: Boolean(options.reactions),
+          });
 
           if (!post) {
             throw new CliError("Could not match that post URL to one of your recent posts. Try increasing `--limit`.");
@@ -58,17 +64,13 @@ export function registerFeedCommand(program: Command): void {
             return;
           }
 
-          printKeyValue([
-            ["Actor", post.actorName],
-            ["Published", post.publishedAt],
-            ["Text", post.text],
-            ["Likes", post.likes],
-            ["Comments", post.comments],
-            ["Reposts", post.reposts],
-          ]);
+          printPostDetailSummary(post);
         } finally {
           await close();
         }
       }),
     );
+
+  registerPostCommand("post", "Get a specific LinkedIn post with optional comments and reactions");
+  registerPostCommand("posts", "Alias for `linkedin post`");
 }

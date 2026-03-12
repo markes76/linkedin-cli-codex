@@ -1,8 +1,10 @@
 import type { Command } from "commander";
 
 import { printJson } from "../output/json.js";
-import { printContentStatsSummary, printFeedItemsTable } from "../output/table.js";
+import { parseLinkedInProfileIdentifier } from "../api/voyager.js";
+import { printContentSearchResultsTable, printContentStatsSummary, printFeedItemsTable, printHashtagResearchSummary } from "../output/table.js";
 import { runCommand } from "../utils/errors.js";
+import { withDefaultLimit } from "../utils/command.js";
 import { getApiForCommand } from "./support.js";
 
 function parsePeriodDays(input: string | undefined): number {
@@ -44,6 +46,57 @@ export function registerContentCommand(program: Command): void {
             console.log("");
             printFeedItemsTable(stats.topPosts);
           }
+        } finally {
+          await close();
+        }
+      }),
+    );
+
+  content
+    .command("search <query>")
+    .description("Search LinkedIn posts and articles")
+    .option("--author <linkedinUrl>", "Filter by author profile")
+    .option("--period <period>", "Time period like 30d", "30d")
+    .option("--type <type>", "Content type: post, article, document, video")
+    .action((query, options, command) =>
+      runCommand(async () => {
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.searchContent({
+            keywords: query,
+            limit: withDefaultLimit(context.limit, 10),
+            author: options.author ? parseLinkedInProfileIdentifier(options.author) : undefined,
+            periodDays: options.period ? parsePeriodDays(options.period) : undefined,
+            type: options.type,
+          });
+
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          printContentSearchResultsTable(result.items);
+        } finally {
+          await close();
+        }
+      }),
+    );
+
+  content
+    .command("hashtags <hashtag>")
+    .description("Research a LinkedIn hashtag")
+    .action((hashtag, _options, command) =>
+      runCommand(async () => {
+        const { context, api, close } = await getApiForCommand(command);
+        try {
+          const result = await api.getHashtagResearch(hashtag, withDefaultLimit(context.limit, 10));
+
+          if (context.json) {
+            printJson(result);
+            return;
+          }
+
+          printHashtagResearchSummary(result);
         } finally {
           await close();
         }

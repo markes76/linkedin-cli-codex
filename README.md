@@ -131,7 +131,8 @@ linkedin connections mutual https://www.linkedin.com/in/some-person/
 linkedin feed
 linkedin feed --mine
 linkedin feed --mine --stats
-linkedin posts "<post-url>"
+linkedin post "<post-url>" --comments --reactions
+linkedin posts "<post-url>" --comments --reactions
 ```
 
 ### Messaging
@@ -172,6 +173,8 @@ linkedin company "Anthropic" employees --title "engineer"
 ```bash
 linkedin content stats --period 30d
 linkedin content stats --period 90d --top 5 --json
+linkedin content search "enterprise AI"
+linkedin content hashtags artificialintelligence
 ```
 
 ### Analytics
@@ -195,6 +198,8 @@ linkedin search posts "enterprise AI"
 ### Jobs
 
 ```bash
+linkedin jobs search "product manager" --location "Tel Aviv"
+linkedin jobs detail "https://www.linkedin.com/jobs/view/123/"
 linkedin jobs saved
 linkedin jobs applied
 linkedin jobs recommended
@@ -255,8 +260,9 @@ Add `linkedin` or `linkedin-cli` as an allowed terminal tool and prefer the `--j
 
 - LinkedIn rate limits aggressively. This CLI spaces requests by default and surfaces 401, 403, and 429 errors with actionable messages.
 - Voyager endpoints are undocumented. Some commands are best-effort and may need endpoint refreshes over time.
-- `profile`, `connections`, `feed`, and `search` are the primary working flows in this scaffold.
-- `jobs saved`, `jobs applied`, and `jobs recommended` are registered and ready for future endpoint wiring, but currently return empty scaffold data.
+- `profile`, `connections`, `feed`, `search`, and the new Phase 3 content/jobs reads are the primary working flows in this scaffold.
+- `jobs saved` and `jobs applied` are wired to the LinkedIn jobs tracker and may return empty arrays on empty accounts.
+- `jobs recommended` remains a best-effort wrapper, not a dedicated LinkedIn recommendation endpoint.
 - If you need to troubleshoot transport behavior, set `LINKEDIN_CLI_TRANSPORT=http` to force raw cookie replay or `LINKEDIN_CLI_BROWSER_HEADFUL=1` to run browser-backed reads in a visible Chrome window.
 
 ## Contributing

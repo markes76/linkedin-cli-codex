@@ -12,7 +12,7 @@ It records what has already been implemented, what has been verified, what is st
 The project is scaffolded, buildable, and published locally as a working package.
 
 Git status:
-- Latest pushed commit at time of writing: `d01278a`
+- Latest pushed commit before Phase 3 work: `adbeb4f`
 - Branch: `main`
 - Remote: `origin` -> `https://github.com/markes76/linkedin-cli-codex.git`
 
@@ -65,6 +65,16 @@ Reusable skill:
 - `linkedin company <url-or-name>`
 - `linkedin company <url-or-name> employees`
 
+### Phase 3 Features Now Added
+
+- `linkedin post <post-url> --comments --reactions`
+- `linkedin content search`
+- `linkedin content hashtags`
+- `linkedin jobs search`
+- `linkedin jobs detail`
+- `linkedin jobs saved`
+- `linkedin jobs applied`
+
 ### Important Fixes Already Landed
 
 - Browser-backed requests now navigate to the requested LinkedIn page instead of reusing the wrong tab
@@ -75,12 +85,16 @@ Reusable skill:
 
 ## Known Limitations
 
-- `jobs saved`, `jobs applied`, and `jobs recommended` remain scaffold-level empty buckets
 - Some parsed outputs are still best-effort because LinkedIn DOM and Voyager responses are inconsistent
+- `jobs saved` and `jobs applied` now resolve from the jobs tracker page, but empty-state accounts will legitimately return empty arrays
+- `jobs recommended` is still a light best-effort wrapper around jobs search, not a dedicated recommendation endpoint
+- `post <url>` works well for post text, counts, and top-level comments, but company comments can still surface slightly imperfect author labels when LinkedIn omits the page name in visible text
+- `content hashtags` is useful for recent posts and related hashtags, but follower count is often unavailable because LinkedIn routes hashtag pages into generic search on this account
+- `jobs detail` is strong on title, company, location, description, and company metadata; inferred `skills` remain best-effort keyword extraction, not official LinkedIn skill tags
 - `connections mutual` depends on LinkedIn exposing a mutual-connections surface for the current account/profile pair
 - `company employees` is accurate enough to use, but title-filtered results can still be noisy because LinkedIn search ranking is inconsistent
 - We have not yet done a broad real-account validation pass
-- The CLI is still missing the larger Phase 1-5 command surface requested in the expanded spec
+- The CLI is still missing the larger Phase 4-5 surface, shared output modes beyond JSON/CSV stdout, and some richer edge-case hardening
 
 ## Safety Notes
 
@@ -103,15 +117,20 @@ Reusable skill:
 - enrich `company` output with recent posts and better about-page fields
 - keep testing `connections mutual` on profiles where the dummy account can actually see shared links
 
-### Phase 3
+### Phase 3 Cleanup
 
-- `linkedin post <post-url> --comments --reactions`
-- `linkedin content search`
-- `linkedin content hashtags`
-- `linkedin jobs search`
-- `linkedin jobs detail`
-- `linkedin jobs saved`
-- `linkedin jobs applied`
+- tighten company-post comment attribution in `post <url> --comments`
+- improve content search cleanup for poll/job cards and company author labels
+- decide whether to trim or hide large `raw` payloads in more JSON responses
+- consider a dedicated recommendation endpoint for `jobs recommended` if a stable one appears
+
+### Phase 4
+
+- `linkedin profile compare <url1> <url2>`
+- `linkedin profile audit`
+- `linkedin enrich --file profiles.txt --output enriched.json`
+- `linkedin profile <url> --also-viewed`
+- advanced people search filters
 
 ### Shared Output Layer
 
@@ -126,13 +145,14 @@ Build once and reuse across commands:
 
 Do not switch to the real account yet.
 
-First finish Phase 1 and shared output modes on the dummy account.
+Finish the current Phase 3 cleanup and shared output modes on the dummy account first.
 After that, do a narrow real-account smoke test:
 
 - `linkedin status --json`
 - `linkedin profile --deep --json`
 - `linkedin connections list --limit 10 --json`
 - `linkedin content stats --period 30d --json`
+- `linkedin jobs saved --json`
 
 ## Files Most Relevant Right Now
 
@@ -155,6 +175,16 @@ After that, do a narrow real-account smoke test:
 - `linkedin company Anthropic employees --limit 5 --json`
 - `linkedin company Anthropic employees --title engineer --limit 3 --json`
 - `linkedin connections mutual https://www.linkedin.com/in/williamhgates/ --json`
+
+## Verified In Phase 3
+
+- `linkedin post https://www.linkedin.com/feed/update/urn:li:activity:7437272568400683008/ --comments --reactions --json`
+- `linkedin content search "Anthropic Claude" --limit 2 --json`
+- `linkedin content hashtags artificialintelligence --limit 3 --json`
+- `linkedin jobs search "product manager" --location "Tel Aviv" --limit 3 --json`
+- `linkedin jobs detail https://www.linkedin.com/jobs/view/4348826698/ --json`
+- `linkedin jobs saved --json`
+- `linkedin jobs applied --json`
 
 ## Update Rule
 

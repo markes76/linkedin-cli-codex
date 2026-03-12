@@ -4,10 +4,15 @@ import type {
   CompanyEmployeeSummary,
   CompanyProfileSummary,
   ConnectionSummary,
+  ContentSearchResultSummary,
   ContentStatsSummary,
   FeedItemSummary,
+  HashtagResearchSummary,
+  JobDetailSummary,
+  JobSummary,
   MutualConnectionsSummary,
   NetworkMapSummary,
+  PostDetailSummary,
   ProfileViewersResult,
   ProfileSummary,
   SearchResultSummary,
@@ -232,4 +237,78 @@ export function printCompanyEmployeesTable(items: CompanyEmployeeSummary[]): voi
     ["Name", "Title", "Location", "Degree", "Profile"],
     items.map((item) => [item.fullName, item.title, item.location, item.connectionDegree, item.profileUrl]),
   );
+}
+
+export function printContentSearchResultsTable(items: ContentSearchResultSummary[]): void {
+  printTable(
+    ["Author", "Published", "Type", "Text", "URL"],
+    items.map((item) => [item.authorName, item.publishedAt, item.contentType, item.text, item.url]),
+  );
+}
+
+export function printHashtagResearchSummary(result: HashtagResearchSummary): void {
+  printKeyValue([
+    ["Hashtag", `#${result.hashtag}`],
+    ["Followers", result.followerCount ?? undefined],
+    ["Related hashtags", result.relatedHashtags.join(", ") || undefined],
+    ["Note", result.note],
+  ]);
+
+  if (result.recentPosts.length) {
+    console.log("");
+    printContentSearchResultsTable(result.recentPosts);
+  }
+}
+
+export function printJobsTable(items: JobSummary[]): void {
+  printTable(
+    ["Title", "Company", "Location", "Workplace", "Posted", "URL"],
+    items.map((item) => [item.title, item.company, item.location, item.workplaceType, item.postedAt, item.url]),
+  );
+}
+
+export function printJobDetailSummary(job: JobDetailSummary): void {
+  printKeyValue([
+    ["Title", job.title],
+    ["Company", job.company],
+    ["Location", job.location],
+    ["Workplace type", job.workplaceType],
+    ["Employment type", job.employmentType],
+    ["Seniority", job.seniorityLevel],
+    ["Applicants", job.applicantCount],
+    ["Posted", job.postedAt],
+    ["Company followers", job.companyFollowers],
+    ["Company industry", job.companyIndustry],
+    ["Company employees", job.companyEmployeeCount],
+    ["URL", job.url],
+    ["Description", job.description],
+  ]);
+
+  if (job.skills.length) {
+    console.log("");
+    printTable(["Skill"], job.skills.map((item) => [item]));
+  }
+}
+
+export function printPostDetailSummary(post: PostDetailSummary): void {
+  printKeyValue([
+    ["Author", post.actorName],
+    ["Author headline", post.authorHeadline],
+    ["Published", post.publishedAt],
+    ["Visibility", post.visibility],
+    ["Text", post.text],
+    ["Media title", post.mediaTitle],
+    ["Media URL", post.mediaUrl],
+    ["Reactions", post.reactionBreakdown?.total ?? post.likes],
+    ["Comments", post.comments],
+    ["Reposts", post.reposts],
+  ]);
+
+  if (post.commentList.length) {
+    console.log("");
+    printTable(
+      ["Author", "Published", "Comment"],
+      post.commentList.map((item) => [item.authorName, item.publishedAt, item.text]),
+    );
+  }
 }

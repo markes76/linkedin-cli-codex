@@ -209,10 +209,38 @@ export interface FeedItemSummary {
   actorUrl?: string;
   text?: string;
   publishedAt?: string;
+  visibility?: string;
   likes?: number;
   comments?: number;
   reposts?: number;
   raw?: unknown;
+}
+
+export interface ReactionBreakdown {
+  total?: number;
+  like?: number;
+  celebrate?: number;
+  support?: number;
+  insightful?: number;
+  funny?: number;
+  love?: number;
+}
+
+export interface PostCommentSummary {
+  authorName?: string;
+  authorHeadline?: string;
+  publishedAt?: string;
+  text?: string;
+  likes?: number;
+  replies?: PostCommentSummary[];
+}
+
+export interface PostDetailSummary extends FeedItemSummary {
+  authorHeadline?: string;
+  mediaTitle?: string;
+  mediaUrl?: string;
+  reactionBreakdown?: ReactionBreakdown;
+  commentList: PostCommentSummary[];
 }
 
 export interface MessageSummary {
@@ -324,11 +352,48 @@ export interface ContentStatsSummary {
   topPosts: FeedItemSummary[];
 }
 
+export interface ContentSearchResultSummary {
+  id?: string;
+  authorName?: string;
+  authorUrl?: string;
+  authorHeadline?: string;
+  text?: string;
+  publishedAt?: string;
+  contentType?: "post" | "article" | "document" | "video" | "poll";
+  url?: string;
+  likes?: number;
+  comments?: number;
+  reposts?: number;
+  hashtags: string[];
+  raw?: unknown;
+}
+
+export interface HashtagResearchSummary {
+  hashtag: string;
+  followerCount: number | null;
+  relatedHashtags: string[];
+  recentPosts: ContentSearchResultSummary[];
+  note?: string;
+}
+
 export interface JobSummary {
   id?: string;
   title?: string;
   company?: string;
   location?: string;
+  workplaceType?: string;
+  postedAt?: string;
+  applicantCount?: number;
   url?: string;
   raw?: unknown;
+}
+
+export interface JobDetailSummary extends JobSummary {
+  description?: string;
+  employmentType?: string;
+  seniorityLevel?: string;
+  skills: string[];
+  companyFollowers?: number;
+  companyIndustry?: string;
+  companyEmployeeCount?: string;
 }

@@ -85,9 +85,14 @@ Useful fields:
 ```bash
 linkedin content stats --period 30d --json
 linkedin content stats --period 90d --top 5 --json
+linkedin content search "enterprise AI" --json
+linkedin content search "enterprise AI" --author https://www.linkedin.com/in/some-person/ --period 30d --json
+linkedin content hashtags artificialintelligence --json
 ```
 
 - `linkedin content stats`: returns a performance summary for the authenticated member's recent posts over the requested period.
+- `linkedin content search`: searches public post/article-style results on LinkedIn and returns structured recent content items.
+- `linkedin content hashtags`: best-effort hashtag research using LinkedIn's current hashtag/search routing. Expect `followerCount: null` on some accounts.
 
 Useful fields:
 
@@ -99,6 +104,11 @@ Useful fields:
 - `postingFrequencyPerWeek`
 - `bestPost`
 - `topPosts`
+- `items[].authorName`
+- `items[].authorHeadline`
+- `items[].text`
+- `items[].hashtags`
+- `relatedHashtags`
 
 ## Feed and post commands
 
@@ -106,13 +116,15 @@ Useful fields:
 linkedin feed --json
 linkedin feed --mine --json
 linkedin feed --mine --stats --json
-linkedin posts "<post-url>" --json
+linkedin post "<post-url>" --comments --reactions --json
+linkedin posts "<post-url>" --comments --reactions --json
 ```
 
 - `linkedin feed`: attempts to return recent feed items from the viewer feed.
 - `linkedin feed --mine`: returns the viewer's recent posts.
 - `linkedin feed --mine --stats`: same as above, with engagement stats surfaced in terminal output.
-- `linkedin posts <post-url>`: looks for a matching recent post and returns engagement data for it.
+- `linkedin post <post-url>`: opens the post page and returns post text, counts, and optional top-level comments and reaction totals.
+- `linkedin posts <post-url>`: alias for `linkedin post`.
 
 Useful fields:
 
@@ -122,6 +134,9 @@ Useful fields:
 - `items[].likes`
 - `items[].comments`
 - `items[].reposts`
+- `commentList[].authorName`
+- `commentList[].authorHeadline`
+- `reactionBreakdown.total`
 
 ## Messaging commands
 
@@ -251,12 +266,40 @@ People search also includes:
 ## Jobs commands
 
 ```bash
+linkedin jobs search "product manager" --location "Tel Aviv" --json
+linkedin jobs detail "https://www.linkedin.com/jobs/view/123/" --json
 linkedin jobs saved --json
 linkedin jobs applied --json
 linkedin jobs recommended --json
 ```
 
-These commands are scaffolded for future Voyager endpoint coverage. Expect empty results until a stable endpoint is wired in.
+- `linkedin jobs search`: current live jobs search with optional location/company/workplace filters.
+- `linkedin jobs detail`: job detail page scrape with title, company, description, company metadata, and best-effort inferred skills.
+- `linkedin jobs saved`: reads the jobs tracker saved bucket. Empty accounts legitimately return `[]`.
+- `linkedin jobs applied`: reads the jobs tracker applied bucket. Empty accounts legitimately return `[]`.
+- `linkedin jobs recommended`: best-effort wrapper around jobs search and not yet a dedicated recommendation endpoint.
+
+Useful fields:
+
+- `items[].title`
+- `items[].company`
+- `items[].location`
+- `items[].workplaceType`
+- `description`
+- `employmentType`
+- `applicantCount`
+- `companyIndustry`
+
+## Natural language mapping
+
+- "Show the comments on this post" -> `linkedin post "<post-url>" --comments --reactions --json`
+- "How are my posts performing?" -> `linkedin content stats --period 30d --json`
+- "Search LinkedIn posts about enterprise AI" -> `linkedin content search "enterprise AI" --json`
+- "What is happening under #AI?" -> `linkedin content hashtags ai --json`
+- "Find product manager jobs in Tel Aviv" -> `linkedin jobs search "product manager" --location "Tel Aviv" --json`
+- "Show me this job in detail" -> `linkedin jobs detail "<job-url>" --json`
+- "What jobs have I saved?" -> `linkedin jobs saved --json`
+- "What jobs have I applied to?" -> `linkedin jobs applied --json`
 
 ## Natural language query mapping
 

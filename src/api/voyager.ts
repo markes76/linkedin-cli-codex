@@ -3,11 +3,14 @@ import type {
   CompanyEmployeeSummary,
   CompanyProfileSummary,
   ConnectionSummary,
+  ContentSearchResultSummary,
   CountBreakdown,
   ContentStatsSummary,
   DeepProfileSummary,
   FeedItemSummary,
+  HashtagResearchSummary,
   InvitationSummary,
+  JobDetailSummary,
   JobSummary,
   MessageSummary,
   MutualConnectionsSummary,
@@ -16,8 +19,11 @@ import type {
   NetworkSuggestionSummary,
   NotificationSummary,
   PaginatedResult,
+  PostCommentSummary,
+  PostDetailSummary,
   ProfileViewerSummary,
   ProfileViewersResult,
+  ReactionBreakdown,
   ProfileSummary,
   ProfileEducation,
   ProfileFeaturedItem,
@@ -188,7 +194,9 @@ function stripVerificationSuffix(value: string | undefined): string | undefined 
   }
 
   const normalized = value.replace(/\s+with verification$/i, "").trim();
-  return normalized || undefined;
+  const repeatedMatch = normalized.match(/^(.+?)\s+\1$/i);
+  const cleaned = repeatedMatch?.[1]?.trim() || normalized;
+  return cleaned || undefined;
 }
 
 function isActionLine(value: string): boolean {
@@ -638,6 +646,11 @@ function parseFeedItem(item: unknown): FeedItemSummary | null {
     textValue(getPath(root, ["header", "text"])),
     textValue(getPath(actorComponent, ["subtitle"])),
   );
+  const visibility = firstDefined(
+    textValue(getPath(record, ["footer", "text"])),
+    textValue(getPath(root, ["footer", "text"])),
+    textValue(getPath(record, ["accessibilityText"])),
+  );
 
   const id = getUrnId(
     firstDefined(
@@ -661,6 +674,7 @@ function parseFeedItem(item: unknown): FeedItemSummary | null {
     actorUrl,
     text,
     publishedAt,
+    visibility,
     likes: numberValue(firstDefined(counts.numLikes, counts.likesCount)),
     comments: numberValue(firstDefined(counts.numComments, commentsState.totalComments, commentsState.totalFirstLevelComments)),
     reposts: numberValue(firstDefined(counts.numShares, counts.numReposts)),
@@ -929,6 +943,223 @@ function parseCountRange(line: string | undefined): number | undefined {
 
   const multiplier = match[2]?.toUpperCase() === "K" ? 1_000 : match[2]?.toUpperCase() === "M" ? 1_000_000 : match[2]?.toUpperCase() === "B" ? 1_000_000_000 : 1;
   return Math.round(base * multiplier);
+}
+
+function parseApplicantCount(line: string | undefined): number | undefined {
+  const normalized = normalizeLine(line ?? "");
+  if (!normalized) {
+    return undefined;
+  }
+
+  const match = normalized.match(/(\d[\d,]*)\+?\s+applicants?/i);
+  if (!match) {
+    return undefined;
+  }
+
+  return Number.parseInt((match[1] ?? "").replace(/,/g, ""), 10);
+}
+
+function extractJobId(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value.match(/\/jobs\/view\/(\d+)/)?.[1] ?? value.match(/\b(\d{6,})\b/)?.[1];
+}
+
+function buildActivityUrl(activityId: string | undefined): string | undefined {
+  return activityId ? `https://www.linkedin.com/feed/update/urn:li:activity:${activityId}/` : undefined;
+}
+
+function normalizeHashtag(value: string): string {
+  return value.replace(/^#/, "").trim().toLowerCase();
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function dedupeRepeatedText(value: string | undefined): string | undefined {
+  const normalized = normalizeLine(value ?? "");
+  if (!normalized) {
+    return undefined;
+  }
+
+  const half = Math.floor(normalized.length / 2);
+  if (normalized.length % 2 === 0 && normalized.slice(0, half) === normalized.slice(half)) {
+    return normalized.slice(0, half).trim();
+  }
+
+  return normalized;
+}
+
+function isRelativeTimeLine(value: string): boolean {
+  return /^\d+[hdwm]$|^\d+\s+(minutes?|hours?|days?|weeks?|months?)$/i.test(value);
+}
+
+function isRelationshipLine(value: string): boolean {
+  return /^(verified|influencer)(\s+•.*)?$|^•\s*(1st|2nd|3rd\+)$|^\d[\d,.]*\s+followers?$/i.test(normalizeLine(value));
+}
+
+function isLikelyHeadline(value: string | undefined): boolean {
+  const normalized = normalizeLine(value ?? "");
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.length <= 140 &&
+    !/https?:\/\//i.test(normalized) &&
+    !/visible to anyone on or off linkedin/i.test(normalized) &&
+    !/^\d+[hdwm]\s*•?$/i.test(normalized) &&
+    !/^(follow|connect|message|like|comment|repost|send|add a comment|open emoji keyboard)$/i.test(normalized) &&
+    !isRelativeTimeLine(normalized) &&
+    !isRelationshipLine(normalized)
+  );
+}
+
+function parseCommentThreadFromLines(lines: string[]): PostCommentSummary[] {
+  const exactStart = lines.findIndex((line) => /^most relevant$/i.test(line));
+  const start = exactStart >= 0 ? exactStart : lines.findIndex((line) => /most relevant/i.test(line));
+  if (start < 0) {
+    return [];
+  }
+
+  const comments: PostCommentSummary[] = [];
+  let index = start + 1;
+
+  while (index < lines.length) {
+    const authorName = lines[index];
+    if (
+      !authorName ||
+      /^(most relevant|current selected sort order is most relevant|load more comments|follow|show more)$/i.test(authorName)
+    ) {
+      index += 1;
+      continue;
+    }
+
+    let authorHeadline: string | undefined;
+    let publishedAt: string | undefined;
+    const textParts: string[] = [];
+    let cursor = index + 1;
+
+    while (cursor < lines.length && isRelationshipLine(lines[cursor] ?? "")) {
+      cursor += 1;
+    }
+
+    while (cursor < lines.length && !isRelativeTimeLine(lines[cursor] ?? "")) {
+      const value = lines[cursor]!;
+      if (/^(like|reply|show translation|show translation of this comment)$/i.test(value)) {
+        break;
+      }
+      if (!authorHeadline && isLikelyHeadline(value)) {
+        authorHeadline = value;
+      }
+      cursor += 1;
+    }
+
+    if (cursor < lines.length && isRelativeTimeLine(lines[cursor] ?? "")) {
+      publishedAt = lines[cursor];
+      cursor += 1;
+    }
+
+    while (cursor < lines.length) {
+      const value = lines[cursor]!;
+      if (/^(like|reply|show translation|show translation of this comment|load more comments)$/i.test(value)) {
+        break;
+      }
+      textParts.push(value);
+      cursor += 1;
+    }
+
+    comments.push({
+      authorName: dedupeRepeatedText(authorName),
+      authorHeadline,
+      publishedAt,
+      text: textParts.join(" ").trim() || undefined,
+    });
+
+    while (cursor < lines.length && /^(like|reply|show translation|show translation of this comment|\d+|load more comments)$/i.test(lines[cursor] ?? "")) {
+      cursor += 1;
+    }
+
+    index = cursor;
+  }
+
+  return comments.filter((comment) => comment.authorName && comment.text).slice(0, 10);
+}
+
+function scoreContentSearchItem(item: Pick<ContentSearchResultSummary, "id" | "url" | "authorHeadline" | "text" | "hashtags">): number {
+  return (item.id ? 4 : 0) + (item.url ? 3 : 0) + (item.authorHeadline ? 2 : 0) + ((item.text?.length ?? 0) > 120 ? 2 : 1) + item.hashtags.length;
+}
+
+function extractSkillsFromJobDescription(description: string | undefined): string[] {
+  const normalized = description ?? "";
+  const patterns = [
+    /\bSQL\b/gi,
+    /\bPython\b/gi,
+    /\bJavaScript\b/gi,
+    /\bTypeScript\b/gi,
+    /\bReact\b/gi,
+    /\bNode\.?js\b/gi,
+    /\bAI\b/gi,
+    /\bMachine Learning\b/gi,
+    /\bData Science\b/gi,
+    /\bData Analysis\b/gi,
+    /\bUX\b/gi,
+    /\bB2B SaaS\b/gi,
+    /\bHealthcare\b/gi,
+    /\bEnglish\b/gi,
+    /\bHebrew\b/gi,
+    /\bProduct Management\b/gi,
+  ];
+
+  const matches = patterns.flatMap((pattern) => normalized.match(pattern) ?? []);
+  const canonical = new Map<string, string>();
+  for (const match of matches.map((value) => normalizeLine(value))) {
+    const key = match.toLowerCase();
+    if (!canonical.has(key)) {
+      canonical.set(
+        key,
+        key === "ai"
+          ? "AI"
+          : key === "ux"
+            ? "UX"
+            : key === "sql"
+              ? "SQL"
+              : key === "node.js" || key === "nodejs"
+                ? "Node.js"
+                : match,
+      );
+    }
+  }
+
+  return [...canonical.values()];
+}
+
+function detectContentType(lines: string[]): ContentSearchResultSummary["contentType"] {
+  const joined = lines.join(" ").toLowerCase();
+  if (joined.includes("job by")) {
+    return "document";
+  }
+
+  if (joined.includes("media is loading") || joined.includes("playmedia is loading")) {
+    return "video";
+  }
+
+  if (joined.includes("votes") || joined.includes("week left") || joined.includes("days left")) {
+    return "poll";
+  }
+
+  if (joined.includes("document is loading")) {
+    return "document";
+  }
+
+  if (joined.includes("newsletter")) {
+    return "article";
+  }
+
+  return "post";
 }
 
 function sortTopPosts(items: FeedItemSummary[]): FeedItemSummary[] {
@@ -1433,6 +1664,16 @@ export class VoyagerApi {
     };
   }
 
+  async getPostDetails(
+    postUrl: string,
+    options: {
+      comments?: boolean;
+      reactions?: boolean;
+    } = {},
+  ): Promise<PostDetailSummary> {
+    return this.scrapePostDetailPage(postUrl, options);
+  }
+
   async getMessages(options: {
     limit: number;
     unread?: boolean;
@@ -1591,7 +1832,19 @@ export class VoyagerApi {
 
   async search(vertical: SearchVertical, keywords: string, limit: number): Promise<PaginatedResult<SearchResultSummary>> {
     if (vertical === "jobs") {
-      return this.scrapeJobSearch(keywords, limit);
+      const result = await this.scrapeJobSearch(keywords, limit, {});
+      return {
+        ...result,
+        items: result.items.map((item) => ({
+          id: item.id,
+          type: "jobs" as const,
+          title: item.title ?? "Job",
+          subtitle: item.company,
+          location: item.location,
+          url: item.url,
+          raw: item.raw,
+        })),
+      };
     }
 
     if (vertical === "posts") {
@@ -1688,6 +1941,60 @@ export class VoyagerApi {
     };
   }
 
+  async searchContent(options: {
+    keywords: string;
+    limit: number;
+    author?: string;
+    periodDays?: number;
+    type?: "post" | "article" | "document" | "video";
+  }): Promise<PaginatedResult<ContentSearchResultSummary>> {
+    const items = await this.scrapeContentSearch(options.keywords, Math.max(options.limit * 2, 10));
+    let filtered = items;
+
+    if (options.author) {
+      const authorIdentifier = parseLinkedInProfileIdentifier(options.author);
+      filtered = filtered.filter((item) => item.authorUrl?.includes(`/in/${authorIdentifier}`));
+    }
+
+    if (options.type) {
+      filtered = filtered.filter((item) => item.contentType === options.type);
+    }
+
+    if (options.periodDays) {
+      const cutoff = Date.now() - options.periodDays * 24 * 60 * 60 * 1000;
+      filtered = filtered.filter((item) => {
+        const timestamp = item.publishedAt ? Date.parse(item.publishedAt) : Number.NaN;
+        return Number.isNaN(timestamp) ? true : timestamp >= cutoff;
+      });
+    }
+
+    filtered = filtered.slice(0, options.limit);
+
+    return {
+      items: filtered,
+      start: 0,
+      count: filtered.length,
+      total: filtered.length,
+      nextStart: undefined,
+    };
+  }
+
+  async getHashtagResearch(keyword: string, limit: number): Promise<HashtagResearchSummary> {
+    const normalized = normalizeHashtag(keyword);
+    const posts = await this.scrapeContentSearch(`#${normalized}`, Math.max(limit, 10));
+    const relatedHashtags = uniqueStrings(
+      posts.flatMap((item) => item.hashtags.map((tag) => tag.toLowerCase())).filter((tag) => tag !== normalized),
+    ).slice(0, 10);
+
+    return {
+      hashtag: normalized,
+      followerCount: null,
+      relatedHashtags,
+      recentPosts: posts.slice(0, limit),
+      note: "LinkedIn currently routes hashtag lookups through search results on this account, so follower count is not always exposed.",
+    };
+  }
+
   async getAnalytics(limit: number): Promise<AnalyticsSummary> {
     const feed = await this.getFeed({ limit, mine: true });
     const topPosts = sortTopPosts(feed.items).slice(0, Math.min(feed.items.length, 5));
@@ -1717,14 +2024,26 @@ export class VoyagerApi {
     return this.getViewerProfile();
   }
 
-  async getJobsBucket(_bucket: "saved" | "applied" | "recommended", _limit: number): Promise<PaginatedResult<JobSummary>> {
-    return {
-      items: [],
-      start: 0,
-      count: 0,
-      total: 0,
-      nextStart: undefined,
-    };
+  async searchJobs(options: {
+    keywords: string;
+    limit: number;
+    location?: string;
+    company?: string;
+    workplaceType?: "remote" | "hybrid" | "onsite";
+  }): Promise<PaginatedResult<JobSummary>> {
+    return this.scrapeJobSearch(options.keywords, options.limit, options);
+  }
+
+  async getJobDetails(jobUrl: string): Promise<JobDetailSummary> {
+    return this.scrapeJobDetailPage(jobUrl);
+  }
+
+  async getJobsBucket(bucket: "saved" | "applied" | "recommended", limit: number): Promise<PaginatedResult<JobSummary>> {
+    if (bucket === "recommended") {
+      return this.scrapeJobSearch("", limit, {});
+    }
+
+    return this.scrapeJobsTrackerBucket(bucket, limit);
   }
 
   private resultTypeForVertical(vertical: SearchVertical): string {
@@ -2386,41 +2705,204 @@ export class VoyagerApi {
     };
   }
 
-  private async scrapeJobSearch(keywords: string, limit: number): Promise<PaginatedResult<SearchResultSummary>> {
-    const page = await this.client.openPage(`https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(keywords)}`);
+  private async scrapePostDetailPage(
+    postUrl: string,
+    options: {
+      comments?: boolean;
+      reactions?: boolean;
+    },
+  ): Promise<PostDetailSummary> {
+    const identifier = postUrl.match(/(activity|ugcPost):?(\d+)/)?.[2] ?? postUrl.match(/(activity|ugcPost)-?(\d+)/)?.[2] ?? postUrl.match(/(\d{10,})/)?.[1];
+    const normalizedUrl = postUrl.includes("/feed/update/")
+      ? postUrl
+      : buildActivityUrl(identifier) ?? postUrl;
+    const page = await this.client.openPage(normalizedUrl);
+    await page.waitForTimeout(3000);
+
+    const scraped = await page.evaluate(() => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const main = document.querySelector("main");
+      const article = (main?.querySelector('[data-urn^="urn:li:activity:"]') ?? main?.querySelector('[role="article"]')) as HTMLElement | null;
+      const lines = (article?.innerText ?? main?.innerText ?? "")
+        .split("\n")
+        .map(normalize)
+        .filter(Boolean);
+      const buttons = Array.from(article?.querySelectorAll("button") ?? []).map((button) => normalize(button.textContent ?? "")).filter(Boolean);
+      const anchors = Array.from(article?.querySelectorAll("a[href]") ?? []).map((anchor) => ({
+        href: (anchor as HTMLAnchorElement).href,
+        text: normalize(anchor.textContent ?? ""),
+      }));
+
+      return {
+        urn: article?.getAttribute("data-urn") ?? undefined,
+        lines,
+        buttons,
+        anchors,
+      };
+    });
+
+    const buttons = scraped.buttons;
+    const publishedLine = scraped.lines.find((line) => /visible to anyone on or off linkedin/i.test(line)) ?? scraped.lines.find((line) => /^\d+[hdwm]/i.test(line));
+    const publishedIndex = publishedLine ? scraped.lines.indexOf(publishedLine) : -1;
+    const actorBlock = scraped.lines.slice(0, publishedIndex >= 0 ? publishedIndex : 8);
+    const textStart = scraped.lines.findIndex((line) => /visible to anyone on or off linkedin/i.test(line));
+    const textEnd = scraped.lines.findIndex((line) => /^\d[\d,]*$/.test(line) || /^\d+\s+comments$/i.test(line));
+    const textLines = scraped.lines
+      .slice(textStart >= 0 ? textStart + 1 : 6, textEnd >= 0 ? textEnd : undefined)
+      .filter((line) => !/^(follow|like|comment|repost|send|reactions|add a comment…|…|…more)$/i.test(line));
+    const actorName = dedupeRepeatedText(
+      actorBlock.find(
+        (line, index) =>
+          index > 0 &&
+          !/^feed post$/i.test(line) &&
+          !/followers?$/i.test(line) &&
+          !/^\d+[hdwm]/i.test(line) &&
+          !/visible to anyone on or off linkedin/i.test(line),
+      ),
+    );
+    const actorLineIndex = actorBlock.findIndex((line) => line === actorName);
+    const authorHeadline = actorBlock.find(
+      (line, index) =>
+        index > actorLineIndex &&
+        line !== actorName &&
+        isLikelyHeadline(line),
+    );
+    const reactionBreakdown: ReactionBreakdown | undefined = options.reactions
+      ? {
+          total: numberValue(buttons.find((value) => /^\d[\d,]*$/.test(value))),
+        }
+      : undefined;
+
+    return {
+      id: identifier ?? getUrnId(scraped.urn),
+      actorName,
+      authorHeadline,
+      text: textLines.join(" ").trim() || undefined,
+      publishedAt: publishedLine,
+      visibility: scraped.lines.find((line) => /visible to anyone on or off linkedin/i.test(line)),
+      likes: numberValue(buttons.find((value) => /^\d[\d,]*$/.test(value))),
+      comments: numberValue(buttons.find((value) => /^\d+\s+comments$/i.test(value))),
+      reposts: numberValue(buttons.find((value) => /^\d+\s+reposts?$/i.test(value))),
+      mediaTitle: scraped.anchors.find((anchor) => anchor.href.includes("http") && !anchor.href.includes("linkedin.com"))?.text || undefined,
+      mediaUrl: scraped.anchors.find((anchor) => anchor.href.includes("http") && !anchor.href.includes("linkedin.com"))?.href,
+      reactionBreakdown,
+      commentList: options.comments ? parseCommentThreadFromLines(scraped.lines) : [],
+      raw: scraped,
+    };
+  }
+
+  private async scrapeContentSearch(keywords: string, limit: number): Promise<ContentSearchResultSummary[]> {
+    const page = await this.client.openPage(`https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(keywords)}`);
     await page.waitForTimeout(3000);
 
     const items = await page.evaluate((maxItems) => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const isRelationshipLineLocal = (value: string) =>
+        /^(verified|influencer)(\s+•.*)?$|^•\s*(1st|2nd|3rd\+)$|^\d[\d,.]*\s+followers?$/i.test(normalize(value));
+      const isLikelyHeadlineLocal = (value: string | undefined) => {
+        const normalized = normalize(value ?? "");
+        return (
+          normalized.length > 0 &&
+          normalized.length <= 140 &&
+          !/https?:\/\//i.test(normalized) &&
+          !/visible to anyone on or off linkedin/i.test(normalized) &&
+          !/^\d+[hdwm]\s*•?$/i.test(normalized) &&
+          !/^(follow|connect|message|like|comment|repost|send|add a comment|open emoji keyboard)$/i.test(normalized) &&
+          !isRelationshipLineLocal(normalized)
+        );
+      };
+      const cards = Array.from(document.querySelectorAll(".fie-impression-container, .feed-shared-update-v2")) as HTMLElement[];
+      const results: Array<{
+        id?: string;
+        authorName?: string;
+        authorUrl?: string;
+        authorHeadline?: string;
+        text?: string;
+        publishedAt?: string;
+        contentType?: "post" | "article" | "document" | "video" | "poll";
+        url?: string;
+        likes?: number;
+        comments?: number;
+        reposts?: number;
+        hashtags: string[];
+      }> = [];
       const seen = new Set<string>();
-      const results: Array<{ title?: string; subtitle?: string; location?: string; url?: string }> = [];
-      const links = Array.from(document.querySelectorAll('a[href*="/jobs/view/"]')) as HTMLAnchorElement[];
 
-      for (const link of links) {
-        const url = link.href;
-        if (seen.has(url)) {
+      for (const card of cards) {
+        const root = (card.querySelector('[data-urn^="urn:li:activity:"]') ?? card) as HTMLElement;
+        const activityUrn = root.getAttribute("data-urn") ?? undefined;
+        const activityId = activityUrn?.match(/activity:(\d+)/)?.[1];
+        const url = activityId ? `https://www.linkedin.com/feed/update/urn:li:activity:${activityId}/` : undefined;
+        if (url && seen.has(url)) {
           continue;
         }
 
-        const card = link.closest(".job-card-container") ?? link.closest("div");
-        const lines = (card?.textContent ?? link.textContent ?? "")
+        const lines = (card.innerText ?? "")
           .split("\n")
-          .map((line: string) => line.replace(/\s+/g, " ").trim())
+          .map(normalize)
+          .filter(Boolean)
+          .filter((line, index, all) => all.indexOf(line) === index);
+
+        if (!lines.length) {
+          continue;
+        }
+
+        const authorLinks = Array.from(card.querySelectorAll('a[href*="/in/"], a[href*="/company/"]')) as HTMLAnchorElement[];
+        const authorLink = authorLinks.find((anchor) => normalize(anchor.textContent ?? "")) ?? authorLinks[0];
+        const hashtags = Array.from(card.querySelectorAll('a[href*="keywords=%23"], a[href*="origin=HASH_TAG_FROM_FEED"]'))
+          .map((anchor) => normalize((anchor as HTMLAnchorElement).textContent ?? "").replace(/^hashtag/i, "").replace(/^#/, "").trim())
           .filter(Boolean);
-
-        const cleaned = lines
-          .map((line: string) => line.replace(/\s+with verification$/i, "").trim())
-          .filter((line: string, index: number, all: string[]) => all.indexOf(line) === index);
-
-        const title = cleaned[0];
-        const subtitle = cleaned.find(
-          (line: string, index: number) => index > 0 && !/^(viewed|promoted|easy apply)$/i.test(line) && !/with verification$/i.test(line) && line !== title,
+        const publishedAt = lines.find((line) => /visible to anyone on or off linkedin/i.test(line) || /^\d+\s+(minutes?|hours?|days?|weeks?)\s+ago/i.test(line) || /^\d+[hdwm]/i.test(line));
+        const publishedIndex = publishedAt ? lines.indexOf(publishedAt) : -1;
+        const statsIndex = lines.findIndex((line) => /^\d[\d,]*$/.test(line) || /^\d+\s+comments$/i.test(line));
+        const degreeIndex = lines.findIndex((line) => /3rd\+|2nd|1st|followers/i.test(line));
+        const authorName = (authorLink ? normalize(authorLink.textContent ?? "").split("•")[0]?.trim() : lines[0]) || undefined;
+        const authorHeadline = lines.find(
+          (line, index) =>
+            index > (degreeIndex >= 0 ? degreeIndex : 0) &&
+            index < (publishedIndex >= 0 ? publishedIndex : lines.length) &&
+            line !== authorName &&
+            isLikelyHeadlineLocal(line),
         );
-        const location = cleaned.find(
-          (line: string, index: number) => index > 0 && line !== title && line !== subtitle && /\b[A-Z][a-z]+/.test(line),
-        );
+        const textStart = lines.findIndex((line) => /^(follow|connect)$/i.test(line));
+        const text = lines
+          .slice(textStart >= 0 ? textStart + 1 : 4, statsIndex >= 0 ? statsIndex : undefined)
+          .filter((line) => !/^(…more|like|comment|repost|send|feed post|view my newsletter|pause|unmute|play|turn fullscreen on)$/i.test(line))
+          .filter((line) => !/^(loaded:|remaining time|playback speed)/i.test(line))
+          .filter((line) => !/^\d+:\d+$|^\d+(\.\d+)?x$/i.test(line))
+          .join(" ")
+          .trim();
+        const likes = lines.find((line) => /^\d[\d,]*$/.test(line));
+        const comments = lines.find((line) => /^\d+\s+comments$/i.test(line));
+        const reposts = lines.find((line) => /^\d+\s+reposts?$/i.test(line));
+        const contentType = /votes|week left|days left/i.test(lines.join(" "))
+          ? "poll"
+          : /media is loading|playmedia is loading/i.test(lines.join(" ").toLowerCase())
+            ? "video"
+            : /document is loading|job by/i.test(lines.join(" ").toLowerCase())
+              ? "document"
+              : /newsletter/i.test(lines.join(" ").toLowerCase())
+                ? "article"
+                : "post";
 
-        seen.add(url);
-        results.push({ title, subtitle, location, url });
+        results.push({
+          id: activityId,
+          authorName,
+          authorUrl: authorLink?.href?.split("?")[0],
+          authorHeadline,
+          text: text || undefined,
+          publishedAt,
+          contentType,
+          url,
+          likes: likes ? Number.parseInt(likes.replace(/,/g, ""), 10) : undefined,
+          comments: comments ? Number.parseInt(comments, 10) : undefined,
+          reposts: reposts ? Number.parseInt(reposts, 10) : undefined,
+          hashtags,
+        });
+
+        if (url) {
+          seen.add(url);
+        }
 
         if (results.length >= maxItems) {
           break;
@@ -2430,84 +2912,126 @@ export class VoyagerApi {
       return results;
     }, limit);
 
-    return {
-      items: items
-        .map((item) => ({
-          id: getUrnId(item.url),
-          type: "jobs" as const,
-          title: stripVerificationSuffix(item.title) ?? "Job",
-          subtitle: item.subtitle,
-          location: item.location,
-          url: item.url,
-        }))
-        .filter((item) => item.title),
-      start: 0,
-      count: items.length,
-      total: items.length,
-      nextStart: undefined,
-    };
+    const normalizedItems = items
+      .map((item) => ({
+        ...item,
+        authorName: dedupeRepeatedText(item.authorName),
+        authorHeadline: dedupeRepeatedText(item.authorHeadline),
+        hashtags: uniqueStrings(item.hashtags.map((tag) => normalizeHashtag(tag))),
+        raw: item,
+      }))
+      .filter((item) => item.authorName || item.text);
+
+    const merged = new Map<string, (typeof normalizedItems)[number]>();
+    for (const item of normalizedItems) {
+      const key = normalizeLine(`${item.authorUrl ?? item.authorName ?? ""}|${item.publishedAt ?? ""}|${item.text ?? ""}|${item.contentType ?? ""}`);
+      const existing = merged.get(key);
+      if (!existing || scoreContentSearchItem(item) > scoreContentSearchItem(existing)) {
+        merged.set(key, item);
+      }
+    }
+
+    return [...merged.values()].slice(0, limit);
   }
 
-  private async scrapePostSearch(keywords: string, limit: number): Promise<PaginatedResult<SearchResultSummary>> {
-    const page = await this.client.openPage(`https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(keywords)}`);
+  private async scrapeJobSearch(
+    keywords: string,
+    limit: number,
+    options: {
+      location?: string;
+      company?: string;
+      workplaceType?: "remote" | "hybrid" | "onsite";
+    },
+  ): Promise<PaginatedResult<JobSummary>> {
+    const params = new URLSearchParams();
+    if (keywords) params.set("keywords", keywords);
+    if (options.location) params.set("location", options.location);
+    const page = await this.client.openPage(`https://www.linkedin.com/jobs/search/?${params.toString()}`);
     await page.waitForTimeout(3000);
 
     const items = await page.evaluate((maxItems) => {
-      const isActionLine = (value: string) =>
-        ["follow", "connect", "message", "show all", "show more", "view job", "like", "comment", "repost", "send", "save", "apply"].includes(
-          value.toLowerCase(),
-        );
-      const isSearchPostsStopLine = (value: string) =>
-        isActionLine(value) ||
-        /\b\d+\s+(likes?|comments?|reposts?|followers?)\b/i.test(value) ||
-        /visible to anyone on or off linkedin/i.test(value);
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const pickText = (root: ParentNode, selectors: string[]) => {
+        for (const selector of selectors) {
+          const node = root.querySelector(selector);
+          const value = normalize(node?.textContent ?? "");
+          if (value) {
+            return value;
+          }
+        }
+        return undefined;
+      };
       const seen = new Set<string>();
-      const results: Array<{ title?: string; subtitle?: string; snippet?: string; url?: string }> = [];
-      const cards = Array.from(document.querySelectorAll(".fie-impression-container")) as HTMLElement[];
+      const results: Array<{
+        id?: string;
+        title?: string;
+        company?: string;
+        location?: string;
+        workplaceType?: string;
+        postedAt?: string;
+        applicantCount?: number;
+        url?: string;
+      }> = [];
+      const cards = Array.from(
+        document.querySelectorAll(".job-card-container, li.scaffold-layout__list-item, li.jobs-search-results__list-item"),
+      ) as HTMLElement[];
 
       for (const card of cards) {
-        const lines = card.innerText
+        const link = card.querySelector('a[href*="/jobs/view/"]') as HTMLAnchorElement | null;
+        if (!link) {
+          continue;
+        }
+
+        const url = link.href.split("?")[0];
+        if (seen.has(url)) {
+          continue;
+        }
+
+        const lines = (card.textContent ?? link.textContent ?? "")
           .split("\n")
-          .map((line: string) => line.replace(/\s+/g, " ").trim())
+          .map(normalize)
           .filter(Boolean)
-          .filter((line: string, index: number, all: string[]) => all.indexOf(line) === index);
-
-        if (lines.length < 5 || !lines.some((line: string) => /^(follow|connect)$/i.test(line))) {
-          continue;
-        }
-
-        const anchors = Array.from(card.querySelectorAll("a[href]")) as HTMLAnchorElement[];
-        const url = anchors.find((anchor) => /\/(pulse|jobs\/view|in|company)\//.test(anchor.href) && !/\/help\//.test(anchor.href))?.href;
-
-        if (!url || seen.has(url)) {
-          continue;
-        }
-
-        const title = lines.find(
-          (line: string) =>
-            !/^(feed post|follow|connect|message|premium|verified)$/i.test(line) &&
-            !/^\d+\s*(hours?|days?|weeks?|months?)\s+ago/i.test(line) &&
-            !/^visible to anyone on or off linkedin$/i.test(line),
-        );
-        const subtitle = lines.find(
-          (line: string, index: number) =>
-            index > 0 &&
-            line !== title &&
-            !/^(follow|connect|message)$/i.test(line) &&
-            !/^\d+[hmwdy]/i.test(line) &&
-            !/^visible to anyone on or off linkedin$/i.test(line),
-        );
-        const followIndex = lines.findIndex((line: string) => /^(follow|connect)$/i.test(line));
-        const snippetLines = (followIndex >= 0 ? lines.slice(followIndex + 1) : lines.slice(2)).filter(
-          (line: string) => !isSearchPostsStopLine(line) && line !== title && line !== subtitle && line !== "…more",
-        );
-        const snippet = snippetLines.join(" ").trim();
+          .filter((line, index, all) => all.indexOf(line) === index);
+        const title = pickText(card, [
+          ".job-card-list__title--link",
+          ".job-card-container__link",
+          ".artdeco-entity-lockup__title a",
+          'a[href*="/jobs/view/"]',
+        ]) ?? lines[0];
+        const company = pickText(card, [
+          ".artdeco-entity-lockup__subtitle span[aria-hidden='true']",
+          ".artdeco-entity-lockup__subtitle",
+          ".job-card-container__primary-description",
+        ]) ?? lines.find((line, index) => index > 0 && line !== title);
+        const metadata = Array.from(
+          card.querySelectorAll(
+            ".job-card-container__metadata-item, .job-card-container__metadata-wrapper li, .artdeco-entity-lockup__caption, .job-card-container__footer-item",
+          ),
+        )
+          .map((node) => normalize(node.textContent ?? ""))
+          .filter(Boolean);
+        const location =
+          metadata.find((line) => !/ago|posted|reposted|applicants?|promoted|actively reviewing|viewed/i.test(line)) ??
+          lines.find((line) => line !== title && line !== company && !/ago|posted|reposted|applicants?/i.test(line));
+        const workplaceHint = [...metadata, ...lines].find((line) => /(remote|hybrid|on-site|onsite)/i.test(line));
+        const postedAt = [...metadata, ...lines].find((line) => /ago|posted|reposted/i.test(line));
+        const applicantLine = [...metadata, ...lines].find((line) => /applicants?/i.test(line));
 
         seen.add(url);
         results.push({
+          id: url.match(/\/jobs\/view\/(\d+)/)?.[1],
           title,
-          subtitle,
-          snippet,
+          company,
+          location,
+          workplaceType: workplaceHint?.match(/remote/i)
+            ? "Remote"
+            : workplaceHint?.match(/hybrid/i)
+              ? "Hybrid"
+              : workplaceHint?.match(/on-site|onsite/i)
+                ? "On-site"
+                : undefined,
+          postedAt,
+          applicantCount: applicantLine ? Number.parseInt(applicantLine.replace(/[^\d]/g, ""), 10) : undefined,
           url,
         });
 
@@ -2517,18 +3041,218 @@ export class VoyagerApi {
       }
 
       return results;
-    }, limit);
+    }, limit * 2);
 
-    const parsedItems = items
-      .map((item) => ({
-        id: extractPublicIdentifier(item.url) ?? getUrnId(item.url),
-        type: "posts" as const,
-        title: item.title ?? "Post",
-        subtitle: item.subtitle,
+    let filtered = items;
+    if (options.company) {
+      const companyQuery = options.company.toLowerCase();
+      filtered = filtered.filter((item) => item.company?.toLowerCase().includes(companyQuery));
+    }
+    if (options.workplaceType) {
+      const workplace = options.workplaceType.toLowerCase();
+      filtered = filtered.filter((item) => item.workplaceType?.toLowerCase().includes(workplace));
+    }
+
+    filtered = filtered.slice(0, limit);
+
+    return {
+      items: filtered.map((item) => ({
+        id: item.id,
+        title: stripVerificationSuffix(item.title),
+        company: stripVerificationSuffix(item.company),
+        location: item.location,
+        workplaceType: item.workplaceType,
+        postedAt: item.postedAt,
+        applicantCount: item.applicantCount,
         url: item.url,
-        snippet: item.snippet,
-      }))
-      .filter((item) => item.title);
+        raw: item,
+      })),
+      start: 0,
+      count: filtered.length,
+      total: filtered.length,
+      nextStart: undefined,
+    };
+  }
+
+  private async scrapeJobDetailPage(jobUrl: string): Promise<JobDetailSummary> {
+    const normalizedUrl = jobUrl.includes("/jobs/view/") ? jobUrl : `https://www.linkedin.com/jobs/view/${extractJobId(jobUrl)}/`;
+    const page = await this.client.openPage(normalizedUrl);
+    await page.waitForTimeout(3000);
+
+    const scraped = await page.evaluate(() => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const main = document.querySelector("main");
+      const lines = (main?.innerText ?? "")
+        .split("\n")
+        .map(normalize)
+        .filter(Boolean);
+      const pickText = (selectors: string[]) => {
+        for (const selector of selectors) {
+          const node = document.querySelector(selector);
+          const value = normalize(node?.textContent ?? "");
+          if (value) {
+            return value;
+          }
+        }
+        return undefined;
+      };
+      const companyLinks = Array.from(main?.querySelectorAll('a[href*="/company/"]') ?? []).map((anchor) => ({
+        href: (anchor as HTMLAnchorElement).href,
+        text: normalize(anchor.textContent ?? ""),
+      }));
+
+      return {
+        lines,
+        companyLinks,
+        title: pickText([".job-details-jobs-unified-top-card__job-title", "h1"]),
+        company: pickText([".job-details-jobs-unified-top-card__company-name", ".job-details-jobs-unified-top-card__company-name a"]),
+        topMeta: pickText([
+          ".job-details-jobs-unified-top-card__primary-description-container",
+          ".job-details-jobs-unified-top-card__primary-description",
+          ".job-details-jobs-unified-top-card__tertiary-description-container",
+          ".job-details-jobs-unified-top-card__tertiary-description",
+        ]),
+        description: pickText([
+          ".jobs-description__content .jobs-box__html-content",
+          ".jobs-description__content",
+          ".jobs-box__html-content",
+        ]),
+      };
+    });
+
+    const title = stripVerificationSuffix(scraped.title) ?? scraped.lines[1];
+    const company = stripVerificationSuffix(scraped.company) ?? scraped.lines[0];
+    const metaLine = scraped.topMeta ?? scraped.lines.find((line) => /applicants?/i.test(line) || /reposted/i.test(line));
+    const metaParts = (metaLine ?? "")
+      .split("·")
+      .map((part) => normalizeLine(part))
+      .filter(Boolean);
+    const workplaceType = scraped.lines.find((line) => /^(On-site|Hybrid|Remote)$/i.test(line));
+    const employmentType = scraped.lines.find((line) => /^(Full-time|Part-time|Contract|Temporary|Internship)$/i.test(line));
+    const descriptionStart = scraped.lines.findIndex((line) => /^About the job$/i.test(line));
+    const nextSectionIndex = scraped.lines.findIndex((line, index) => index > descriptionStart && /^Set alert for similar jobs$|^About the company$/i.test(line));
+    const description = scraped.description || (descriptionStart >= 0
+      ? scraped.lines.slice(descriptionStart + 1, nextSectionIndex >= 0 ? nextSectionIndex : undefined).join(" ").trim()
+      : undefined);
+    const companySectionStart = scraped.lines.findIndex((line) => /^About the company$/i.test(line));
+    const companyFollowers = numberValue(scraped.lines.find((line, index) => index > companySectionStart && /followers?/i.test(line)));
+    const companyIndustry = scraped.lines.find(
+      (line, index) =>
+        index > companySectionStart &&
+        line !== company &&
+        !/^about the company$|^follow$|^•$|followers?|employees?|linkedin$/i.test(line) &&
+        !/^\d/.test(line) &&
+        scraped.lines[index + 1] === "•",
+    );
+    const companyEmployeeCount = scraped.lines.find((line) => /\d+\s*-\s*\d+ employees|\d+-\d+ employees|\d+ employees/i.test(line));
+    const skills = extractSkillsFromJobDescription(description);
+
+    return {
+      id: extractJobId(normalizedUrl),
+      title,
+      company,
+      location: metaParts[0] ?? scraped.lines[2]?.split("·")[0]?.trim(),
+      workplaceType,
+      employmentType,
+      applicantCount: parseApplicantCount(metaLine),
+      postedAt: metaParts.slice(1).join(" · ") || metaLine,
+      description,
+      seniorityLevel: undefined,
+      skills,
+      companyFollowers,
+      companyIndustry,
+      companyEmployeeCount,
+      url: normalizedUrl,
+      raw: scraped,
+    };
+  }
+
+  private async scrapeJobsTrackerBucket(bucket: "saved" | "applied", limit: number): Promise<PaginatedResult<JobSummary>> {
+    const page = await this.client.openPage("https://www.linkedin.com/jobs-tracker/");
+    await page.waitForTimeout(3000);
+
+    const labelMap: Record<"saved" | "applied", string> = {
+      saved: "Saved",
+      applied: "Applied",
+    };
+
+    if (bucket === "applied") {
+      const appliedButton = page.getByText(/Applied/i).first();
+      try {
+        await appliedButton.click({ timeout: 1500 });
+        await page.waitForTimeout(1500);
+      } catch {
+        // The dummy account may not expose an interactive applied tab; fall back to page text parsing.
+      }
+    }
+
+    const scraped = await page.evaluate(({ maxItems, label }) => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const main = document.querySelector("main");
+      const lines = (main?.innerText ?? "")
+        .split("\n")
+        .map(normalize)
+        .filter(Boolean);
+      const countLine = lines.find((line) => line.startsWith(`${label} ·`));
+      const cards = Array.from(document.querySelectorAll('a[href*="/jobs/view/"]')).slice(0, maxItems).map((anchor) => {
+        const link = anchor as HTMLAnchorElement;
+        const container = link.closest(".job-card-container, li, article, div");
+        const cardLines = (container?.textContent ?? link.textContent ?? "")
+          .split("\n")
+          .map(normalize)
+          .filter(Boolean)
+          .filter((line, index, all) => all.indexOf(line) === index);
+        return {
+          id: link.href.match(/\/jobs\/view\/(\d+)/)?.[1],
+          title: cardLines[0],
+          company: cardLines.find((line, index) => index > 0 && line !== cardLines[0]),
+          location: cardLines.find((line) => /\(|hybrid|remote|on-site|onsite/i.test(line)),
+          postedAt: cardLines.find((line) => /ago|posted/i.test(line)),
+          url: link.href.split("?")[0],
+        };
+      });
+
+      return {
+        total: countLine ? Number.parseInt(countLine.replace(/[^\d]/g, ""), 10) : 0,
+        cards,
+        lines,
+      };
+    }, { maxItems: limit, label: labelMap[bucket] });
+
+    const items = (scraped.cards as Array<Record<string, string | undefined>>)
+      .filter((item) => Boolean(item.url && item.title))
+      .slice(0, limit)
+      .map((item) => ({
+        id: item.id,
+        title: stripVerificationSuffix(item.title),
+        company: stripVerificationSuffix(item.company),
+        location: item.location,
+        postedAt: item.postedAt,
+        url: item.url,
+        raw: item,
+      }));
+
+    return {
+      items,
+      start: 0,
+      count: items.length,
+      total: scraped.total ?? items.length,
+      nextStart: undefined,
+    };
+  }
+
+  private async scrapePostSearch(keywords: string, limit: number): Promise<PaginatedResult<SearchResultSummary>> {
+    const items = await this.scrapeContentSearch(keywords, limit);
+    const parsedItems = items.map((item) => ({
+      id: item.id,
+      type: "posts" as const,
+      title: item.authorName ?? "Post",
+      subtitle: item.authorHeadline,
+      url: item.url,
+      snippet: item.text,
+      location: item.publishedAt,
+      raw: item.raw,
+    }));
 
     return {
       items: parsedItems,
