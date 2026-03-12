@@ -29,11 +29,13 @@ linkedin profile --json
 linkedin profile --deep --json
 linkedin profile https://www.linkedin.com/in/some-person/ --json
 linkedin profile https://www.linkedin.com/in/some-person/ --deep --json
+linkedin profile https://www.linkedin.com/in/some-person/ --posts --period 14d --limit 20 --json
 ```
 
 - `linkedin profile`: returns the viewer profile.
 - `linkedin profile <linkedin-url>`: returns another member's profile when the public identifier can be resolved.
 - `linkedin profile --deep`: returns a best-effort deeper profile object with structured arrays for experience, education, skills, featured items, recommendations, and activity stats.
+- `linkedin profile <linkedin-url> --posts`: returns a best-effort scrape of that member's recent activity posts, filtered by `--period` when provided.
 
 Output fields usually include:
 
@@ -48,6 +50,9 @@ Output fields usually include:
 - `skills`
 - `featured`
 - `activity.postsLast30Days`
+- `items[].text`
+- `items[].publishedAt`
+- `items[].url`
 
 ## Connections commands
 
@@ -149,6 +154,7 @@ linkedin messages --search "pricing" --json
 - `linkedin messages`: recent conversations.
 - `linkedin messages --unread`: only unread conversations.
 - `linkedin messages --search`: keyword filter against the recent conversation snapshot.
+- `linkedin messages` may fall back to a browser-page scrape when LinkedIn's legacy conversations endpoint returns `500`, so snippets remain best-effort.
 
 Useful fields:
 
@@ -300,6 +306,7 @@ Useful fields:
 - "Show me this job in detail" -> `linkedin jobs detail "<job-url>" --json`
 - "What jobs have I saved?" -> `linkedin jobs saved --json`
 - "What jobs have I applied to?" -> `linkedin jobs applied --json`
+- "Pull Ruben Hassid's last 20 posts from the last two weeks" -> `linkedin profile https://www.linkedin.com/in/ruben-hassid/ --posts --period 14d --limit 20 --json`
 
 ## Natural language query mapping
 
@@ -321,6 +328,7 @@ Useful fields:
 - "Who viewed my profile recently?" -> `linkedin network viewers --json`
 - "What's the company info for Anthropic?" -> `linkedin company "Anthropic" --json`
 - "Show me Anthropic employees" -> `linkedin company "Anthropic" employees --json`
+- "Pull this person's recent posts" -> `linkedin profile <linkedin-url> --posts --period 14d --limit 20 --json`
 
 ## Combining commands for complex queries
 
@@ -337,6 +345,7 @@ Examples:
 - Relationship snapshot: combine `linkedin profile --json` with `linkedin connections --count --json`.
 - Deep person brief: combine `linkedin profile <linkedin-url> --deep --json` with `linkedin connections list --search "<name>" --json`.
 - Networking prep: combine `linkedin profile <linkedin-url> --deep --json` with `linkedin connections mutual <linkedin-url> --json`.
+- Recent-post research: combine `linkedin profile <linkedin-url> --posts --period 14d --limit 20 --json` with `linkedin profile <linkedin-url> --deep --json`.
 - Company intelligence: combine `linkedin company "<name>" --json` with `linkedin company "<name>" employees --json`.
 - Content health: combine `linkedin feed --mine --stats --json` with `linkedin analytics --json`.
 - Phase 1 content check: combine `linkedin content stats --period 30d --json` with `linkedin feed --mine --stats --json`.

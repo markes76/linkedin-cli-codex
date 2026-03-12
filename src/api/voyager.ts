@@ -42,6 +42,7 @@ import type {
 } from "./types.js";
 import { paginate } from "../utils/pagination.js";
 import type { VoyagerClient } from "./client.js";
+import { LinkedInApiError } from "../utils/errors.js";
 
 const FULL_PROFILE_DECORATION_ID = "com.linkedin.voyager.dash.deco.identity.profile.FullProfile-76";
 const SEARCH_CLUSTERS_QUERY_ID = "voyagerSearchDashClusters.05111e1b90ee7fea15bebe9f9410ced9";
@@ -193,7 +194,11 @@ function stripVerificationSuffix(value: string | undefined): string | undefined 
     return undefined;
   }
 
-  const normalized = value.replace(/\s+with verification$/i, "").trim();
+  const normalized = dedupeRepeatedText(value.replace(/\s+with verification$/i, "").trim());
+  if (!normalized) {
+    return undefined;
+  }
+
   const repeatedMatch = normalized.match(/^(.+?)\s+\1$/i);
   const cleaned = repeatedMatch?.[1]?.trim() || normalized;
   return cleaned || undefined;
@@ -985,6 +990,11 @@ function dedupeRepeatedText(value: string | undefined): string | undefined {
     return undefined;
   }
 
+  const repeatedWithSeparator = normalized.match(/^(.+?)\s+\1$/i);
+  if (repeatedWithSeparator?.[1]) {
+    return repeatedWithSeparator[1].trim();
+  }
+
   const half = Math.floor(normalized.length / 2);
   if (normalized.length % 2 === 0 && normalized.slice(0, half) === normalized.slice(half)) {
     return normalized.slice(0, half).trim();
@@ -993,8 +1003,91 @@ function dedupeRepeatedText(value: string | undefined): string | undefined {
   return normalized;
 }
 
+function cleanProfileActivityText(value: string | undefined): string | undefined {
+  const normalized = normalizeLine(value ?? "");
+  if (!normalized) {
+    return undefined;
+  }
+
+  const cleaned = normalized
+    .replace(/^\d+\s+(minutes?|hours?|days?|weeks?|months?)\s+ago\s*•\s*visible to anyone on or off linkedin\s*/i, "")
+    .replace(/^visible to anyone on or off linkedin\s*/i, "")
+    .replace(/\s*activate to view larger image,?$/i, "")
+    .replace(/\s*your document has finished loading$/i, "")
+    .replace(/\s*pause loaded:.*$/i, "")
+    .trim();
+
+  return cleaned || undefined;
+}
+
 function isRelativeTimeLine(value: string): boolean {
   return /^\d+[hdwm]$|^\d+\s+(minutes?|hours?|days?|weeks?|months?)$/i.test(value);
+}
+
+function parseRelativeAgeDays(value: string | undefined): number | undefined {
+  const normalized = normalizeLine(value ?? "").toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const compactMatch = normalized.match(/(?:^|\b|viewed\s+)(\d+)\s*([mhdw])\b/);
+  if (compactMatch) {
+    const amount = Number.parseInt(compactMatch[1] ?? "0", 10);
+    const unit = compactMatch[2];
+    if (!Number.isFinite(amount)) {
+      return undefined;
+    }
+
+    if (unit === "m") {
+      return amount * 30;
+    }
+
+    if (unit === "w") {
+      return amount * 7;
+    }
+
+    if (unit === "d") {
+      return amount;
+    }
+
+    return amount / 24;
+  }
+
+  const wordsMatch = normalized.match(/(?:^|\b|viewed\s+)(\d+)\s+(minute|minutes|hour|hours|day|days|week|weeks|month|months)\b/);
+  if (!wordsMatch) {
+    return undefined;
+  }
+
+  const amount = Number.parseInt(wordsMatch[1] ?? "0", 10);
+  const unit = wordsMatch[2] ?? "";
+  if (!Number.isFinite(amount)) {
+    return undefined;
+  }
+
+  if (unit.startsWith("month")) {
+    return amount * 30;
+  }
+
+  if (unit.startsWith("week")) {
+    return amount * 7;
+  }
+
+  if (unit.startsWith("day")) {
+    return amount;
+  }
+
+  return amount / 24;
+}
+
+function isWithinPeriod(value: string | undefined, periodDays: number): boolean {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  if (!Number.isNaN(parsed)) {
+    const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+    return parsed >= cutoff;
+  }
+
+  const relativeAgeDays = parseRelativeAgeDays(value);
+  return relativeAgeDays === undefined ? true : relativeAgeDays <= periodDays;
 }
 
 function isRelationshipLine(value: string): boolean {
@@ -1679,13 +1772,25 @@ export class VoyagerApi {
     unread?: boolean;
     search?: string;
   }): Promise<PaginatedResult<MessageSummary>> {
-    const data = await this.client.getJson<unknown>("/messaging/conversations", {
-      params: {
-        keyVersion: "LEGACY_INBOX",
-      },
-    });
+    let items: MessageSummary[];
+    let total: number | undefined;
 
-    let items = extractElements(data).map(parseMessage).filter((item): item is MessageSummary => Boolean(item));
+    try {
+      const data = await this.client.getJson<unknown>("/messaging/conversations", {
+        params: {
+          keyVersion: "LEGACY_INBOX",
+        },
+      });
+      items = extractElements(data).map(parseMessage).filter((item): item is MessageSummary => Boolean(item));
+      total = extractTotal(data) ?? items.length;
+    } catch (error) {
+      if (!(error instanceof LinkedInApiError) || error.status < 500) {
+        throw error;
+      }
+
+      items = await this.scrapeMessagesPage(options.limit * 2);
+      total = items.length;
+    }
 
     if (options.unread) {
       items = items.filter((item) => item.unread);
@@ -1706,7 +1811,7 @@ export class VoyagerApi {
       items,
       start: 0,
       count: items.length,
-      total: extractTotal(data) ?? items.length,
+      total,
       nextStart: undefined,
     };
   }
@@ -1948,10 +2053,18 @@ export class VoyagerApi {
     periodDays?: number;
     type?: "post" | "article" | "document" | "video";
   }): Promise<PaginatedResult<ContentSearchResultSummary>> {
-    const items = await this.scrapeContentSearch(options.keywords, Math.max(options.limit * 2, 10));
+    const items = options.author
+      ? await this.getProfilePosts(options.author, {
+          limit: Math.max(options.limit * 2, 20),
+          periodDays: options.periodDays,
+          keywords: options.keywords || undefined,
+        }).then((result) => result.items)
+      : await this.scrapeContentSearch(options.keywords, Math.max(options.limit * 2, 10));
     let filtered = items;
 
-    if (options.author) {
+    if (options.author && !options.keywords) {
+      filtered = items;
+    } else if (options.author) {
       const authorIdentifier = parseLinkedInProfileIdentifier(options.author);
       filtered = filtered.filter((item) => item.authorUrl?.includes(`/in/${authorIdentifier}`));
     }
@@ -1961,11 +2074,7 @@ export class VoyagerApi {
     }
 
     if (options.periodDays) {
-      const cutoff = Date.now() - options.periodDays * 24 * 60 * 60 * 1000;
-      filtered = filtered.filter((item) => {
-        const timestamp = item.publishedAt ? Date.parse(item.publishedAt) : Number.NaN;
-        return Number.isNaN(timestamp) ? true : timestamp >= cutoff;
-      });
+      filtered = filtered.filter((item) => isWithinPeriod(item.publishedAt, options.periodDays!));
     }
 
     filtered = filtered.slice(0, options.limit);
@@ -2022,6 +2131,54 @@ export class VoyagerApi {
 
   async getFollowerSnapshot(): Promise<ProfileSummary> {
     return this.getViewerProfile();
+  }
+
+  async getProfilePosts(
+    identifier: string | undefined,
+    options: {
+      limit: number;
+      periodDays?: number;
+      keywords?: string;
+    },
+  ): Promise<PaginatedResult<ContentSearchResultSummary>> {
+    const normalized = identifier ? parseLinkedInProfileIdentifier(identifier) : undefined;
+    const profile = await this.getProfile(normalized);
+    const profileUrl = profile.profileUrl ?? buildProfileUrl(profile.publicIdentifier ?? normalized);
+
+    if (!profileUrl) {
+      return {
+        items: [],
+        start: 0,
+        count: 0,
+        total: 0,
+        nextStart: undefined,
+      };
+    }
+
+    let items = await this.scrapeProfilePostsPage(profileUrl, Math.max(options.limit, 10));
+
+    if (options.periodDays) {
+      items = items.filter((item) => isWithinPeriod(item.publishedAt, options.periodDays!));
+    }
+
+    if (options.keywords) {
+      const query = options.keywords.toLowerCase();
+      items = items.filter((item) =>
+        [item.text, item.authorName, item.authorHeadline]
+          .filter(Boolean)
+          .some((value) => value?.toLowerCase().includes(query)),
+      );
+    }
+
+    items = items.slice(0, options.limit);
+
+    return {
+      items,
+      start: 0,
+      count: items.length,
+      total: items.length,
+      nextStart: undefined,
+    };
   }
 
   async searchJobs(options: {
@@ -2239,6 +2396,24 @@ export class VoyagerApi {
 
       const emptyMessage = lines.find((line) => /no profile views/i.test(line));
       const restrictedMessage = lines.find((line) => /premium|subscription|see who's viewed/i.test(line));
+      const collectTexts = (root: Element | null) => {
+        if (!root) {
+          return [] as string[];
+        }
+
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const values: string[] = [];
+        let node = walker.nextNode();
+        while (node) {
+          const value = normalize(node.textContent ?? "");
+          if (value) {
+            values.push(value);
+          }
+          node = walker.nextNode();
+        }
+
+        return values.filter((value, index, all) => all.indexOf(value) === index);
+      };
       const profileLinks = Array.from(main?.querySelectorAll('a[href*="/in/"]') ?? []) as HTMLAnchorElement[];
       const seen = new Set<string>();
       const items: Array<{ fullName?: string; headline?: string; company?: string; profileUrl?: string; viewedAtLabel?: string }> = [];
@@ -2250,16 +2425,27 @@ export class VoyagerApi {
         }
 
         const container = anchor.closest("li, article, div");
-        const itemLines = (container?.textContent ?? anchor.textContent ?? "")
-          .split("\n")
-          .map(normalize)
-          .filter(Boolean);
+        const itemLines = collectTexts(container);
         const fullName = itemLines[0];
-        const viewedAtLabel = itemLines.find((line) => /^\d+\s+(hours?|days?|weeks?|months?)\b/i.test(line) || /^\d+[hdwm]\b/i.test(line));
-        const headline = itemLines.find(
-          (line, index) => index > 0 && line !== fullName && line !== viewedAtLabel && !/^(follow|connect|message|premium)$/i.test(line),
-        );
-        const company = headline?.includes(" at ") ? headline.split(/\s+at\s+/i)[1] : undefined;
+        const viewedAtLabel = itemLines.find((line) => /^viewed\s+\d+\s*(hours?|days?|weeks?|months?|[hdwm])\b/i.test(line));
+        const headline = itemLines.find((line, index) => {
+          if (index === 0 || line === fullName || line === viewedAtLabel) {
+            return false;
+          }
+
+          return line !== "·"
+            && !/^view .* profile$/i.test(line)
+            && !/^·\s*(1st|2nd|3rd\+?)$/i.test(line)
+            && !/^(1st|2nd|3rd\+?)$/i.test(line)
+            && !/^\d+\s+mutual connections?$/i.test(line)
+            && !/^(follow|connect|message|premium)$/i.test(line)
+            && !/^viewed\s+\d+\s*(hours?|days?|weeks?|months?|[hdwm])\b/i.test(line);
+        });
+        const company = headline?.includes(" at ")
+          ? headline.split(/\s+at\s+/i)[1]
+          : headline?.includes("@")
+            ? headline.split("@")[1]?.trim()
+            : undefined;
 
         if (!fullName) {
           continue;
@@ -2307,6 +2493,97 @@ export class VoyagerApi {
       availability: scraped.availability,
       message: scraped.message,
     };
+  }
+
+  private async scrapeMessagesPage(limit: number): Promise<MessageSummary[]> {
+    const page = await this.client.openPage("https://www.linkedin.com/messaging/");
+    await page.waitForTimeout(3000);
+
+    const items = await page.evaluate((maxItems) => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const isTimestamp = (value: string) =>
+        /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}$/i.test(value)
+        || /^\d+\s*(m|h|d|w)$/i.test(value)
+        || /^\d+\s+(minutes?|hours?|days?|weeks?)$/i.test(value);
+      const cardRoots = Array.from(document.querySelectorAll("main li, main article, main [role='listitem']"))
+        .filter((node) => {
+          const text = normalize((node as HTMLElement).innerText ?? "");
+          return Boolean(text) && (isTimestamp(text) || (node as Element).querySelector('a[href*="/in/"]'));
+        }) as HTMLElement[];
+      const seen = new Set<string>();
+      const results: Array<{
+        id?: string;
+        title?: string;
+        snippet?: string;
+        unread: boolean;
+        participants: string[];
+        updatedAt?: string;
+      }> = [];
+
+      for (const root of cardRoots) {
+        const anchor = (root.querySelector('a[href*="/messaging/thread/"], a[href*="/messaging/detail/"], a[href*="/in/"]') as HTMLAnchorElement | null);
+        const url = anchor?.href?.split("?")[0] ?? normalize(root.innerText).slice(0, 120);
+        if (seen.has(url)) {
+          continue;
+        }
+
+        const lines = (root.textContent ?? anchor?.textContent ?? "")
+          .split("\n")
+          .map(normalize)
+          .filter(Boolean)
+          .filter((line, index, all) => all.indexOf(line) === index)
+          .filter((line) => !/^active conversation$/i.test(line))
+          .filter((line) => !/^status is /i.test(line));
+        const participants = Array.from(root.querySelectorAll('a[href*="/in/"]'))
+          .map((node) => normalize((node as HTMLAnchorElement).textContent ?? ""))
+          .filter(Boolean)
+          .filter((line) => !/^view .* profile$/i.test(line))
+          .filter((line, index, all) => all.indexOf(line) === index);
+        const title = participants[0] ?? lines.find((line) => !/^(you:|you sent|seen|message|online|offline)$/i.test(line) && !isTimestamp(line));
+        const updatedAt = lines.find((line) => isTimestamp(line));
+        const snippet = lines.find((line) =>
+          line !== title &&
+          line !== updatedAt &&
+          line !== "·" &&
+          !participants.includes(line) &&
+          !/^view profile$/i.test(line) &&
+          !/^(seen|message)$/i.test(line),
+        );
+        const unread = (root.getAttribute("class") ?? "").toLowerCase().includes("unread")
+          || lines.some((line) => /^unread$/i.test(line))
+          || Boolean(root.querySelector('[class*="unread"], [data-test-unread], .msg-conversation-card__unread-count'));
+
+        if (!title) {
+          continue;
+        }
+
+        seen.add(url);
+        results.push({
+          id: url.match(/\/messaging\/(?:thread|detail)\/([^/]+)/)?.[1] ?? url,
+          title,
+          snippet,
+          unread,
+          participants: participants.length ? participants : [title],
+          updatedAt,
+        });
+
+        if (results.length >= maxItems) {
+          break;
+        }
+      }
+
+      return results;
+    }, limit);
+
+    return items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      snippet: item.snippet,
+      unread: item.unread,
+      participants: item.participants,
+      updatedAt: item.updatedAt,
+      raw: item,
+    }));
   }
 
   private async scrapeCompanyProfilePage(url: string, searchResult?: SearchResultSummary): Promise<CompanyProfileSummary> {
@@ -2934,6 +3211,152 @@ export class VoyagerApi {
     return [...merged.values()].slice(0, limit);
   }
 
+  private async scrapeProfilePostsPage(profileUrl: string, limit: number): Promise<ContentSearchResultSummary[]> {
+    const normalizedUrl = profileUrl.replace(/\/+$/, "");
+    const page = await this.client.openPage(`${normalizedUrl}/recent-activity/all/`);
+    await page.waitForTimeout(3000);
+
+    for (let index = 0; index < 10; index += 1) {
+      const currentCount = await page.locator(".feed-shared-update-v2").count();
+      if (currentCount >= limit) {
+        break;
+      }
+
+      await page.evaluate(() => {
+        for (const button of Array.from(document.querySelectorAll("button, a"))) {
+          const text = button.textContent?.replace(/\s+/g, " ").trim().toLowerCase();
+          if (text && /^(show more|load more|see more)$/i.test(text)) {
+            (button as HTMLElement).click();
+          }
+        }
+      });
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 1.75));
+      await page.waitForTimeout(1200);
+    }
+
+    const items = await page.evaluate((maxItems) => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const cards = Array.from(document.querySelectorAll(".feed-shared-update-v2")) as HTMLElement[];
+      const results: Array<{
+        id?: string;
+        authorName?: string;
+        authorUrl?: string;
+        authorHeadline?: string;
+        text?: string;
+        publishedAt?: string;
+        contentType?: "post" | "article" | "document" | "video" | "poll";
+        url?: string;
+        likes?: number;
+        comments?: number;
+        reposts?: number;
+        hashtags: string[];
+      }> = [];
+      const seen = new Set<string>();
+
+      for (const card of cards) {
+        const activityRoot = (card.querySelector('[data-urn^="urn:li:activity:"]') ?? card) as HTMLElement;
+        const activityUrn = activityRoot.getAttribute("data-urn") ?? undefined;
+        const activityId = activityUrn?.match(/activity:(\d+)/)?.[1];
+        const url = activityId ? `https://www.linkedin.com/feed/update/urn:li:activity:${activityId}/` : undefined;
+        if (url && seen.has(url)) {
+          continue;
+        }
+
+        const lines = (card.innerText ?? "")
+          .split("\n")
+          .map(normalize)
+          .filter(Boolean)
+          .filter((line, index, all) => all.indexOf(line) === index);
+
+        if (!lines.length) {
+          continue;
+        }
+
+        const authorLinks = Array.from(card.querySelectorAll('a[href*="/in/"], a[href*="/company/"]')) as HTMLAnchorElement[];
+        const authorLink = authorLinks.find((anchor) => normalize(anchor.textContent ?? "").length > 0) ?? authorLinks[0];
+        const authorName = authorLink ? normalize(authorLink.textContent ?? "").split("•")[0]?.trim() : undefined;
+        const publishedAt = lines.find((line) => /^\d+\s*(minutes?|hours?|days?|weeks?|months?|[hdwm])\b/i.test(line));
+        const publishedIndex = publishedAt ? lines.indexOf(publishedAt) : -1;
+        const actionIndex = lines.findIndex((line) => /^(follow|connect|message)$/i.test(line));
+        const statsIndex = lines.findIndex((line) => /^\d[\d,]*$|^\d+\s+comments$|^\d+\s+reposts?$/i.test(line));
+        const headline = lines.find((line, index) =>
+          index > 0 &&
+          index < (publishedIndex >= 0 ? publishedIndex : lines.length) &&
+          line !== authorName &&
+          line !== "·" &&
+          !/^(follow|connect|message)$/i.test(line) &&
+          !/^(premium|following)$/i.test(line) &&
+          !/^view my newsletter$/i.test(line) &&
+          !/^verified|influencer|^\d[\d,.]*\s+followers?$/i.test(line),
+        );
+        const hashtags = Array.from(card.querySelectorAll('a[href*="keywords=%23"], a[href*="origin=HASH_TAG_FROM_FEED"]'))
+          .map((anchor) => normalize((anchor as HTMLAnchorElement).textContent ?? "").replace(/^hashtag/i, "").replace(/^#/, "").trim())
+          .filter(Boolean);
+        const text = lines
+          .slice(publishedIndex >= 0 ? publishedIndex + 1 : actionIndex >= 0 ? actionIndex + 1 : 3, statsIndex >= 0 ? statsIndex : undefined)
+          .filter((line) => line !== authorName && line !== headline && line !== publishedAt)
+          .filter((line) => line !== "·")
+          .filter((line) => !/^visible to anyone on or off linkedin$/i.test(line))
+          .filter((line) => !/^(premium|following)$/i.test(line))
+          .filter((line) => !/^view my newsletter$/i.test(line))
+          .filter((line) => !/^(…more|like|comment|repost|send|open emoji keyboard|feed post)$/i.test(line))
+          .filter((line) => !/^(activate to view larger image|your document has finished loading)$/i.test(line))
+          .join(" ")
+          .trim();
+        const likes = lines.find((line) => /^\d[\d,]*$/.test(line));
+        const comments = lines.find((line) => /^\d+\s+comments$/i.test(line));
+        const reposts = lines.find((line) => /^\d+\s+reposts?$/i.test(line));
+        const joined = lines.join(" ").toLowerCase();
+        const contentType = joined.includes("newsletter")
+          ? "article"
+          : joined.includes("document is loading") || joined.includes("job by")
+            ? "document"
+            : joined.includes("media is loading") || joined.includes("playmedia is loading")
+              ? "video"
+              : joined.includes("votes") || joined.includes("week left") || joined.includes("days left")
+                ? "poll"
+                : "post";
+
+        results.push({
+          id: activityId,
+          authorName,
+          authorUrl: authorLink?.href?.split("?")[0],
+          authorHeadline: headline,
+          text: text || undefined,
+          publishedAt,
+          contentType,
+          url,
+          likes: likes ? Number.parseInt(likes.replace(/,/g, ""), 10) : undefined,
+          comments: comments ? Number.parseInt(comments, 10) : undefined,
+          reposts: reposts ? Number.parseInt(reposts, 10) : undefined,
+          hashtags,
+        });
+
+        if (url) {
+          seen.add(url);
+        }
+
+        if (results.length >= maxItems) {
+          break;
+        }
+      }
+
+      return results;
+    }, Math.max(limit, 20));
+
+    return items
+      .map((item) => ({
+        ...item,
+        authorName: dedupeRepeatedText(item.authorName),
+        authorHeadline: dedupeRepeatedText(item.authorHeadline),
+        text: cleanProfileActivityText(dedupeRepeatedText(item.text)),
+        hashtags: uniqueStrings(item.hashtags.map((tag) => normalizeHashtag(tag))),
+        raw: item,
+      }))
+      .filter((item) => item.authorName || item.text)
+      .slice(0, limit);
+  }
+
   private async scrapeJobSearch(
     keywords: string,
     limit: number,
@@ -3058,7 +3481,7 @@ export class VoyagerApi {
     return {
       items: filtered.map((item) => ({
         id: item.id,
-        title: stripVerificationSuffix(item.title),
+        title: stripVerificationSuffix(dedupeRepeatedText(item.title)),
         company: stripVerificationSuffix(item.company),
         location: item.location,
         workplaceType: item.workplaceType,

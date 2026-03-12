@@ -1,6 +1,6 @@
 # linkedin-cli Progress
 
-Last updated: 2026-03-12
+Last updated: 2026-03-13
 
 ## Purpose
 
@@ -93,7 +93,8 @@ Reusable skill:
 - `jobs detail` is strong on title, company, location, description, and company metadata; inferred `skills` remain best-effort keyword extraction, not official LinkedIn skill tags
 - `connections mutual` depends on LinkedIn exposing a mutual-connections surface for the current account/profile pair
 - `company employees` is accurate enough to use, but title-filtered results can still be noisy because LinkedIn search ranking is inconsistent
-- We have not yet done a broad real-account validation pass
+- We have now done a broader real-account validation pass, but `messages` still uses a browser-page fallback instead of a stable Voyager response because the direct endpoint returned `500`
+- `profile --posts` is now usable for pulling a member's recent posts, but it still returns a best-effort page scrape and may return slightly fewer posts than the requested `--limit`
 - The CLI is still missing the larger Phase 4-5 surface, shared output modes beyond JSON/CSV stdout, and some richer edge-case hardening
 
 ## Safety Notes
@@ -123,6 +124,7 @@ Reusable skill:
 - improve content search cleanup for poll/job cards and company author labels
 - decide whether to trim or hide large `raw` payloads in more JSON responses
 - consider a dedicated recommendation endpoint for `jobs recommended` if a stable one appears
+- decide whether to promote `profile --posts` into a first-class `profile posts` or `content author` command later
 
 ### Phase 4
 
@@ -199,6 +201,29 @@ Validated on the real account with a deliberately narrow pass:
 Follow-up fix landed after the real-account pass:
 
 - `jobs saved` now parses tracker cards into real `title`, `company`, `location`, and `postedAt` fields instead of collapsing the whole card into one string
+
+## Broader Real-Account Validation
+
+Validated additional live reads on the real account:
+
+- `linkedin messages --json`
+- `linkedin network viewers --json`
+- `linkedin profile https://www.linkedin.com/in/ruben-hassid/ --posts --period 14d --limit 20 --json`
+- `linkedin jobs search "product manager" --location "Israel" --limit 5 --json`
+
+Follow-up fixes landed after that broader pass:
+
+- `messages` now falls back to a browser-page scrape when LinkedIn returns a `500` for the legacy conversations endpoint
+- `network viewers` now parses real headlines and companies instead of surface placeholders like `·` or `3rd`
+- `profile --posts` now scrapes recent activity pages directly, making "pull the recent posts from this profile" work for real public profiles like Ruben Hassid
+- profile-activity text cleanup now removes LinkedIn boilerplate like visibility labels and image-viewer prompts from the main post text
+- job search title cleanup now removes repeated title strings in the top-level parsed result
+
+Current real-account outcome:
+
+- `messages` returns structured conversation rows again, but snippets are still best-effort
+- `network viewers` is now good enough to use
+- `profile --posts --period 14d --limit 20` returned 19 recent Ruben Hassid posts in live validation
 
 ## Update Rule
 

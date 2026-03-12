@@ -111,6 +111,7 @@ linkedin profile
 linkedin profile https://www.linkedin.com/in/some-person/
 linkedin profile --json
 linkedin profile --deep --json
+linkedin profile https://www.linkedin.com/in/some-person/ --posts --period 14d --limit 20 --json
 ```
 
 ### Connections
@@ -142,6 +143,8 @@ linkedin messages
 linkedin messages --unread
 linkedin messages --search "keyword"
 ```
+
+`linkedin messages` may fall back to a browser-page scrape when LinkedIn's legacy conversations endpoint fails, so snippets are best-effort.
 
 ### Notifications
 
@@ -175,6 +178,12 @@ linkedin content stats --period 30d
 linkedin content stats --period 90d --top 5 --json
 linkedin content search "enterprise AI"
 linkedin content hashtags artificialintelligence
+```
+
+For recent posts by a specific profile, prefer:
+
+```bash
+linkedin profile https://www.linkedin.com/in/some-person/ --posts --period 14d --limit 20 --json
 ```
 
 ### Analytics
@@ -275,6 +284,7 @@ Add `linkedin` or `linkedin-cli` as an allowed terminal tool and prefer the `--j
 - LinkedIn rate limits aggressively. This CLI spaces requests by default and surfaces 401, 403, and 429 errors with actionable messages.
 - Voyager endpoints are undocumented. Some commands are best-effort and may need endpoint refreshes over time.
 - `profile`, `connections`, `feed`, `search`, and the new Phase 3 content/jobs reads are the primary working flows in this scaffold.
+- `profile --posts` is now the best route for "give me this person's recent posts," using their recent-activity page rather than generic content search.
 - `jobs saved` and `jobs applied` are wired to the LinkedIn jobs tracker and may return empty arrays on empty accounts.
 - `jobs recommended` remains a best-effort wrapper, not a dedicated LinkedIn recommendation endpoint.
 - If you need to troubleshoot transport behavior, set `LINKEDIN_CLI_TRANSPORT=http` to force raw cookie replay or `LINKEDIN_CLI_BROWSER_HEADFUL=1` to run browser-backed reads in a visible Chrome window.
