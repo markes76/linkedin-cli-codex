@@ -1,9 +1,14 @@
 {
   "name": "linkedin-cli",
-  "version": "0.1.3",
-  "description": "Unofficial LinkedIn CLI for agentic coding tools",
+  "version": "0.1.0",
+  "description": "Unofficial CLI for LinkedIn. Structured JSON output. Agent skill included. Built for Claude Code, Cursor, Codex, and other agentic tools.",
   "type": "module",
+  "author": "Mark Samuelson",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/markes76/linkedin-cli.git"
+  },
   "engines": {
     "node": ">=22"
   },
@@ -18,21 +23,24 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "npm run validate-skill && tsup",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
+    "validate-skill": "node scripts/validate-skill.mjs",
     "browsers:install": "playwright install chrome",
     "prepublishOnly": "npm run clean && npm run typecheck && npm run build"
   },
   "keywords": [
     "linkedin",
     "cli",
-    "voyager",
-    "playwright",
-    "agent",
+    "typescript",
+    "ai-agents",
+    "mcp",
     "claude-code",
     "cursor",
-    "codex"
+    "codex",
+    "automation",
+    "playwright"
   ],
   "dependencies": {
     "chalk": "^5.4.1",

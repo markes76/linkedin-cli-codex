@@ -2,6 +2,7 @@ node_modules/
 dist/
 .DS_Store
 .env
+session.json
 .idea/
 .vscode/
 /output/
@@ -10,3 +11,4 @@ playwright-report/
 *.tgz
 test/
 reports/
+.config/

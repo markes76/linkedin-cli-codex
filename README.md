@@ -1,60 +1,60 @@
 # linkedin-cli
 
-[![Node.js 22+](https://img.shields.io/badge/node-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/typescript-5.8%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![npm](https://img.shields.io/badge/npm-not%20published-lightgrey)](https://github.com/markes76/linkedin-cli)
+[![Node.js](https://img.shields.io/badge/node-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/typescript-5.8%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Playwright](https://img.shields.io/badge/playwright-auth-2EAD33?logo=playwright&logoColor=white)](https://playwright.dev/)
+[![Claude Code Skill](https://img.shields.io/badge/claude%20code-skill-included-7C3AED)](./docs/skill.md)
 
-Unofficial LinkedIn CLI for agentic coding tools like Claude Code, Cursor, Codex, and OpenClaw.
+Unofficial CLI for LinkedIn with structured JSON output and an agent skill for Claude Code, Cursor, Codex, OpenClaw, and other agentic tools.
 
 > [!WARNING]
-> This project is unofficial, uses undocumented LinkedIn Voyager APIs, and is not affiliated with, endorsed by, or supported by LinkedIn.
+> This project is unofficial, not affiliated with LinkedIn, and relies on undocumented Voyager APIs and browser scraping.
+> LinkedIn can change these surfaces at any time, which may break commands without notice.
 > Use it at your own risk.
-> LinkedIn can change or block these APIs at any time, which may break this CLI without notice.
+> Your session cookies and scraped data stay local on your machine. Nothing is proxied through third-party services.
 
 ## Features
 
-- Manual LinkedIn login through a real Chrome window controlled by Playwright
-- Secure local session storage in `~/.config/linkedin-cli/session.json`
-- Browser-backed Voyager requests that reuse the saved LinkedIn Chrome profile for better auth fidelity
-- Read-only profile, connections, feed, messaging, notification, network, analytics, search, and job commands
-- Shared output layer with table, JSON, CSV, Markdown, HTML, file export, clipboard copy, and quiet mode
-- Claude Code skill install, uninstall, status, and show commands
-- TypeScript + Commander.js + tsup packaging for easy npm publishing
+- Real Chrome login via Playwright with a persistent browser profile
+- Read-only access to profile, connections, feed, posts, messages, notifications, network, company pages, jobs, and analytics
+- Structured output for agents via `--json`
+- Shared export layer: table, JSON, CSV, Markdown, HTML, file output, clipboard copy, and quiet mode
+- Built-in multi-source watchlist monitor via `linkedin monitor watchlist`
+- Packaged agent skill with install, status, sync, show, and version commands
+- Build-time skill drift validation so the CLI and `docs/skill.md` stay in sync
 
 ## Requirements
 
-| Requirement | Version |
+| Requirement | Notes |
 | --- | --- |
 | Node.js | 22+ |
 | npm | 10+ recommended |
-| Google Chrome | Current stable |
-| LinkedIn account | Required |
+| Google Chrome | Current stable; used for login and browser-backed reads |
+| LinkedIn account | Required for authenticated commands |
 
 ## Installation
 
-### From npm
+### From GitHub
 
 ```bash
-npm install -g linkedin-cli
-```
-
-### From source
-
-```bash
-git clone <your-repo-url> linkedin-cli
+git clone https://github.com/markes76/linkedin-cli.git
 cd linkedin-cli
 npm install
 npm run build
 npm link
 ```
 
-Install the browser channel Playwright uses for login if needed:
+### Playwright browser install
+
+If Playwright needs a browser channel:
 
 ```bash
 npm run browsers:install
 ```
 
-After installation, both commands work:
+After linking, both commands are available:
 
 ```bash
 linkedin --help
@@ -63,72 +63,78 @@ linkedin-cli --help
 
 ## Authentication
 
-The CLI stores LinkedIn session cookies in:
+The CLI stores session state in:
 
 ```text
 ~/.config/linkedin-cli/session.json
-```
-
-It also maintains a dedicated Playwright Chrome profile in:
-
-```text
 ~/.config/linkedin-cli/browser-profile/
 ```
 
-The file is written with `0600` permissions.
-
-### Log in
+### Login
 
 ```bash
 linkedin login
 ```
 
-This opens a headed Chrome window with a persistent browser profile. Sign in manually, complete MFA if needed, and the CLI will save `li_at` and `JSESSIONID` automatically.
+This opens a real Chrome window through Playwright. Sign in manually and complete MFA if needed. The CLI captures `li_at` and `JSESSIONID` from the authenticated browser session.
 
-After login, read commands prefer a browser-backed Playwright transport that reuses the saved browser profile and full cookie jar. This is a deliberate deviation from the lighter cookie-replay model because it has proven more reliable against LinkedIn’s undocumented auth behavior.
-
-### Check status
+### Status
 
 ```bash
 linkedin status
 linkedin status --json
 ```
 
-### Log out
+### Logout
 
 ```bash
 linkedin logout
 ```
 
-This clears both the saved session file and the CLI-only Playwright browser profile.
+This clears the saved session file and resets the CLI-managed browser profile.
 
 ## Commands
+
+### Core auth
+
+```bash
+linkedin login
+linkedin status
+linkedin logout
+```
 
 ### Profile
 
 ```bash
 linkedin profile
 linkedin profile https://www.linkedin.com/in/some-person/
-linkedin profile --json
 linkedin profile --deep --json
+linkedin profile https://www.linkedin.com/in/some-person/ --deep --json
 linkedin profile https://www.linkedin.com/in/some-person/ --posts --period 14d --limit 20 --json
+```
+
+### Company
+
+```bash
+linkedin company "Anthropic"
+linkedin company "Anthropic" employees --limit 20
+linkedin company "Anthropic" employees --title "engineer"
+linkedin company "Anthropic" posts --period 7d --limit 20 --json
 ```
 
 ### Connections
 
 ```bash
 linkedin connections
-linkedin connections list --company "Google" --title "engineer"
-linkedin connections --search "John"
 linkedin connections --count
+linkedin connections --search "John"
 linkedin connections --recent
+linkedin connections list --company "Google" --title "engineer"
 linkedin connections export
-linkedin connections list --limit 20 --csv
-linkedin connections list --limit 20 --output connections.csv
 linkedin connections mutual https://www.linkedin.com/in/some-person/
 ```
 
-### Feed and posts
+### Feed and post detail
 
 ```bash
 linkedin feed
@@ -138,19 +144,22 @@ linkedin post "<post-url>" --comments --reactions
 linkedin posts "<post-url>" --comments --reactions
 ```
 
-### Messaging
+### Content
+
+```bash
+linkedin content stats --period 30d
+linkedin content stats --period 90d --top 5 --json
+linkedin content search "enterprise AI"
+linkedin content search "enterprise AI" --author https://www.linkedin.com/in/some-person/ --period 30d --json
+linkedin content hashtags artificialintelligence
+```
+
+### Messages and notifications
 
 ```bash
 linkedin messages
 linkedin messages --unread
-linkedin messages --search "keyword"
-```
-
-`linkedin messages` may fall back to a browser-page scrape when LinkedIn's legacy conversations endpoint fails, so snippets are best-effort.
-
-### Notifications
-
-```bash
+linkedin messages --search "pricing"
 linkedin notifications
 linkedin notifications --unread
 ```
@@ -163,29 +172,6 @@ linkedin network invitations --sent
 linkedin network suggestions
 linkedin network map
 linkedin network viewers
-```
-
-### Company
-
-```bash
-linkedin company "Anthropic"
-linkedin company "Anthropic" employees
-linkedin company "Anthropic" employees --title "engineer"
-```
-
-### Content
-
-```bash
-linkedin content stats --period 30d
-linkedin content stats --period 90d --top 5 --json
-linkedin content search "enterprise AI"
-linkedin content hashtags artificialintelligence
-```
-
-For recent posts by a specific profile, prefer:
-
-```bash
-linkedin profile https://www.linkedin.com/in/some-person/ --posts --period 14d --limit 20 --json
 ```
 
 ### Analytics
@@ -210,179 +196,112 @@ linkedin search posts "enterprise AI"
 
 ```bash
 linkedin jobs search "product manager" --location "Tel Aviv"
+linkedin jobs search "AI" --location "Israel" --remote
 linkedin jobs detail "https://www.linkedin.com/jobs/view/123/"
 linkedin jobs saved
 linkedin jobs applied
 linkedin jobs recommended
 ```
 
-### Global flags
+### Monitor
 
 ```bash
---json
---csv
---md
---html
---output <filepath>
---copy
---quiet
---no-color
---limit N
+linkedin monitor watchlist --period 2d --json
 ```
 
-## Output modes
+This runs the built-in influencer + company watchlist monitor with per-source timeout and retry controls, then returns one normalized report object with source summaries, topics, top posts, underperformers, and signals.
 
-Use the default table output for terminal reading, and switch formats when you need export or agent-friendly consumption.
-
-### Table (default)
-
-No extra flag required. Good for interactive use:
+### Skill management
 
 ```bash
-linkedin connections list --limit 10
+linkedin skill install
+linkedin skill uninstall
+linkedin skill status
+linkedin skill show
+linkedin skill sync
+linkedin skill version
 ```
 
-### JSON
+## Global Flags
 
-Preferred for agents, automation, and `jq`:
-
-```bash
-linkedin profile --deep --json
-```
-
-### CSV
-
-Best for flat list data such as connections, employee lists, and job search results:
-
-```bash
-linkedin connections list --limit 50 --csv
-linkedin jobs search "product manager" --location "Israel" --csv
-```
-
-### Markdown
-
-Useful for notes, docs, and pasting into Notion or Google Docs:
-
-```bash
-linkedin profile --deep --md
-linkedin network viewers --md
-```
-
-### HTML
-
-Best for richer report-style output:
-
-```bash
-linkedin content stats --period 30d --html --output content-report.html
-linkedin company "Anthropic" --html --output anthropic.html
-```
-
-### File export
-
-Infer the output format from the file extension:
-
-```bash
-linkedin profile --deep --output profile.md
-linkedin connections list --limit 100 --output connections.csv
-linkedin content stats --period 30d --output content-report.html
-linkedin status --output status.json
-```
-
-### Clipboard
-
-Copy the rendered output directly to the clipboard:
-
-```bash
-linkedin status --json --copy
-```
-
-### Quiet mode
-
-Return only the essential scalar or line-oriented value:
-
-```bash
-linkedin connections --count --quiet
-```
+| Flag | Description |
+| --- | --- |
+| `--json` | Structured JSON output for agents, scripts, and `jq` |
+| `--csv` | CSV export for flat list data |
+| `--md` | Markdown output |
+| `--html` | HTML report-style output |
+| `--output <filepath>` | Write output to a file; format inferred from extension when possible |
+| `--copy` | Copy rendered output to the clipboard |
+| `--quiet`, `-q` | Print only essential data |
+| `--no-color` | Disable Chalk color output |
+| `--limit N` | Limit list results |
 
 ## AI Agent Skills
 
-The bundled skill is designed for agent tooling to discover commands, map natural language requests to CLI invocations, and default to JSON output.
+The primary skill source of truth is:
 
-The skill is distributed in three places:
-- source of truth: [`docs/skill.md`](./docs/skill.md)
-- npm package: bundled inside `linkedin-cli`
-- GitHub releases: downloadable `linkedin-skill.zip` on tagged releases
+```text
+docs/skill.md
+```
+
+Installed copies live in:
+
+```text
+~/.config/linkedin-cli/skill.md
+~/.claude/skills/linkedin-cli.md
+```
 
 ### Claude Code
 
 ```bash
 linkedin skill install
 linkedin skill status
-linkedin skill show
-linkedin skill uninstall
+linkedin skill sync
 ```
 
-The install command writes:
+### Claude Desktop, Cursor, Codex, OpenClaw
 
-```text
-~/.claude/skills/linkedin-cli.md
-```
+Use `docs/skill.md` or the installed copy at `~/.config/linkedin-cli/skill.md` as the instruction file to load before using the CLI.
 
-### Claude Desktop
+Recommended rule for agents:
 
-Use the contents of [`docs/skill.md`](./docs/skill.md) as the tool instruction reference in your local wrapper or MCP bridge.
+- Always read `docs/skill.md` before executing any `linkedin` command.
+- Prefer `--json` for retrieval.
+- Use `linkedin skill status` to detect drift.
+- Use `linkedin skill sync` after upgrading the CLI or if the installed skill hash is out of date.
 
-### GitHub release asset
+### Example natural language queries
 
-Tagged releases publish two downloadable artifacts:
+- "How many connections do I have?"
+- "Pull Ruben Hassid's last 14 days of posts."
+- "What has Anthropic posted this week?"
+- "Show me unread LinkedIn messages."
+- "Find AI jobs in Israel."
+- "Run the watchlist monitor and summarize the top themes."
 
-- `linkedin-cli-<version>.tgz`
-- `linkedin-skill.zip`
+## Tech Stack
 
-This is the recommended GitHub-side distribution path for the skill instead of publishing it as a separate GitHub Package.
-If you also want the workflow to publish to npm, configure `NPM_TOKEN` in the repository secrets. Without it, the workflow now skips npm publish but still creates the GitHub release and uploads both assets.
-
-### OpenClaw
-
-Point your OpenClaw tool manifest or shell-tool wrapper at the `linkedin` binary and use the JSON examples in [`docs/skill.md`](./docs/skill.md).
-
-### Cursor
-
-Add `linkedin` or `linkedin-cli` as an allowed terminal tool and prefer the `--json` examples from [`docs/skill.md`](./docs/skill.md) for structured parsing.
-
-## Tech stack
-
-| Layer | Tooling |
+| Area | Choice |
 | --- | --- |
 | Runtime | Node.js 22+ |
-| Language | TypeScript 5.8+ |
-| CLI | Commander.js |
-| Terminal output | Chalk + cli-table3 |
-| Auth | Playwright with headed Chrome |
+| Language | TypeScript |
+| CLI framework | Commander.js |
+| Auth | Playwright + Chrome |
+| Output | Chalk + cli-table3 + csv-stringify |
 | Build | tsup |
-| Transport | Native `fetch` |
-
-## Important notes
-
-- LinkedIn rate limits aggressively. This CLI spaces requests by default and surfaces 401, 403, and 429 errors with actionable messages.
-- Voyager endpoints are undocumented. Some commands are best-effort and may need endpoint refreshes over time.
-- `profile`, `connections`, `feed`, `search`, and the new Phase 3 content/jobs reads are the primary working flows in this scaffold.
-- `profile --posts` is now the best route for "give me this person's recent posts," using their recent-activity page rather than generic content search.
-- `company <url-or-name> posts` is now the best route for company-page monitoring, using the dedicated company posts page rather than generic content search.
-- `monitor watchlist` now runs the built-in influencer + company brief workflow with per-source timeout, retry, and backoff controls.
-- `jobs saved` and `jobs applied` are wired to the LinkedIn jobs tracker and may return empty arrays on empty accounts.
-- `jobs recommended` remains a best-effort wrapper, not a dedicated LinkedIn recommendation endpoint.
-- The shared output layer is live: global `--json`, `--csv`, `--md`, `--html`, `--output`, `--copy`, and `--quiet` now work across the main command surface.
-- If you need to troubleshoot transport behavior, set `LINKEDIN_CLI_TRANSPORT=http` to force raw cookie replay or `LINKEDIN_CLI_BROWSER_HEADFUL=1` to run browser-backed reads in a visible Chrome window.
+| Transport | Browser-backed Voyager requests with native fetch fallback |
 
 ## Contributing
 
-1. Fork the repo.
+1. Fork the repository.
 2. Create a branch.
 3. Run `npm install`.
 4. Run `npm run typecheck`.
 5. Run `npm run build`.
-6. Open a pull request.
+6. Run `npm pack --dry-run`.
+7. Open a pull request.
+
+There is no automated test suite yet. For now, the main future improvement is adding repeatable integration tests and fixture-based parser tests.
 
 ## MIT License
 

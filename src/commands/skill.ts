@@ -1,86 +1,153 @@
-import { access, chmod, rm, writeFile } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 
 import type { Command } from "commander";
 
-import { printKeyValue } from "../output/table.js";
+import { printKeyValue, printTable } from "../output/table.js";
 import { theme } from "../output/colors.js";
-import { CLAUDE_SKILL_FILE, ensureClaudeSkillDir } from "../utils/config.js";
+import { CLAUDE_SKILL_FILE, CONFIG_SKILL_FILE } from "../utils/config.js";
 import { runCommand } from "../utils/errors.js";
 import { getCommandContext } from "../utils/command.js";
-import { outputForCommand, readBundledSkill } from "./support.js";
+import { getInstalledSkillStatuses, installSkillTargets, readRepoSkill } from "../utils/skill.js";
+import { outputForCommand } from "./support.js";
 
-async function isInstalled(): Promise<boolean> {
-  try {
-    await access(CLAUDE_SKILL_FILE);
-    return true;
-  } catch {
-    return false;
-  }
+function renderStatusTable(statuses: Awaited<ReturnType<typeof getInstalledSkillStatuses>>): void {
+  printTable(
+    ["Target", "Installed", "In sync", "Version", "Path"],
+    statuses.map((item) => [
+      item.label,
+      item.installed ? "yes" : "no",
+      item.matchesRepo ? "yes" : item.installed ? "no" : "—",
+      item.metadata?.skillVersion,
+      item.path,
+    ]),
+  );
 }
 
 export function registerSkillCommand(program: Command): void {
-  const skill = program.command("skill").description("Manage the Claude Code skill for linkedin-cli");
+  const skill = program.command("skill").description("Manage the linkedin-cli agent skill");
 
   skill
     .command("install")
-    .description("Install the bundled Claude Code skill")
+    .description("Install the packaged skill into the local config and Claude Code skill directories")
     .action((_options, command) =>
       runCommand(async () => {
         const context = getCommandContext(command);
-        const content = await readBundledSkill();
-        await ensureClaudeSkillDir();
-        await writeFile(CLAUDE_SKILL_FILE, content, "utf8");
-        await chmod(CLAUDE_SKILL_FILE, 0o600);
+        const repoSkill = await readRepoSkill();
+        const statuses = await installSkillTargets(repoSkill.content);
 
-        const payload = {
+        await outputForCommand(context, {
           installed: true,
-          path: CLAUDE_SKILL_FILE,
-        };
-        await outputForCommand(context, payload, {
+          repoSkillVersion: repoSkill.metadata.skillVersion,
+          targets: statuses,
+        }, {
           title: "linkedin-cli skill install",
-          quietValue: payload.path,
-          renderTable: () => console.log(theme.success(`Claude Code skill installed to ${CLAUDE_SKILL_FILE}`)),
+          quietValue: statuses.map((item) => item.path).join("\n"),
+          renderTable: () => renderStatusTable(statuses),
+        });
+      }),
+    );
+
+  skill
+    .command("sync")
+    .description("Overwrite installed skill files with the latest packaged skill")
+    .action((_options, command) =>
+      runCommand(async () => {
+        const context = getCommandContext(command);
+        const repoSkill = await readRepoSkill();
+        const statuses = await installSkillTargets(repoSkill.content);
+
+        await outputForCommand(context, {
+          synced: true,
+          repoSkillVersion: repoSkill.metadata.skillVersion,
+          targets: statuses,
+        }, {
+          title: "linkedin-cli skill sync",
+          quietValue: repoSkill.metadata.skillVersion,
+          renderTable: () => renderStatusTable(statuses),
         });
       }),
     );
 
   skill
     .command("uninstall")
-    .description("Remove the Claude Code skill")
+    .description("Remove installed skill files from the local config and Claude Code directories")
     .action((_options, command) =>
       runCommand(async () => {
         const context = getCommandContext(command);
+        await rm(CONFIG_SKILL_FILE, { force: true });
         await rm(CLAUDE_SKILL_FILE, { force: true });
 
-        const payload = {
+        await outputForCommand(context, {
           installed: false,
-          path: CLAUDE_SKILL_FILE,
-        };
-        await outputForCommand(context, payload, {
+          targets: [
+            { label: "Config", path: CONFIG_SKILL_FILE },
+            { label: "Claude Code", path: CLAUDE_SKILL_FILE },
+          ],
+        }, {
           title: "linkedin-cli skill uninstall",
-          quietValue: payload.path,
-          renderTable: () => console.log(theme.success(`Claude Code skill removed from ${CLAUDE_SKILL_FILE}`)),
+          quietValue: "removed",
+          renderTable: () =>
+            printTable(
+              ["Target", "Path"],
+              [
+                ["Config", CONFIG_SKILL_FILE],
+                ["Claude Code", CLAUDE_SKILL_FILE],
+              ],
+            ),
         });
       }),
     );
 
   skill
     .command("status")
-    .description("Check whether the Claude Code skill is installed")
+    .description("Check whether installed skill files exist and match the packaged repo skill")
     .action((_options, command) =>
       runCommand(async () => {
         const context = getCommandContext(command);
-        const payload = {
-          installed: await isInstalled(),
-          path: CLAUDE_SKILL_FILE,
-        };
-        await outputForCommand(context, payload, {
+        const repoSkill = await readRepoSkill();
+        const statuses = await getInstalledSkillStatuses(repoSkill.hash);
+
+        await outputForCommand(context, {
+          repoSkillVersion: repoSkill.metadata.skillVersion,
+          repoCliVersionCompatible: repoSkill.metadata.cliVersionCompatible,
+          repoHash: repoSkill.hash,
+          targets: statuses,
+        }, {
           title: "linkedin-cli skill status",
-          quietValue: payload.installed ? "installed" : "not installed",
+          quietValue: statuses.every((item) => item.installed && item.matchesRepo) ? "in-sync" : "out-of-sync",
+          renderTable: () => {
+            printKeyValue([
+              ["Repo skill version", repoSkill.metadata.skillVersion],
+              ["CLI version compatible", repoSkill.metadata.cliVersionCompatible],
+              ["Last updated", repoSkill.metadata.lastUpdated],
+            ]);
+            console.log("");
+            renderStatusTable(statuses);
+          },
+        });
+      }),
+    );
+
+  skill
+    .command("version")
+    .description("Print the packaged skill_version from docs/skill.md")
+    .action((_options, command) =>
+      runCommand(async () => {
+        const context = getCommandContext(command);
+        const repoSkill = await readRepoSkill();
+
+        await outputForCommand(context, {
+          skillVersion: repoSkill.metadata.skillVersion,
+          cliVersionCompatible: repoSkill.metadata.cliVersionCompatible,
+          lastUpdated: repoSkill.metadata.lastUpdated,
+        }, {
+          title: "linkedin-cli skill version",
+          quietValue: repoSkill.metadata.skillVersion,
           renderTable: () =>
             printKeyValue([
-              ["Installed", payload.installed ? "yes" : "no"],
-              ["Path", payload.path],
+              ["Skill version", repoSkill.metadata.skillVersion],
+              ["CLI version compatible", repoSkill.metadata.cliVersionCompatible],
+              ["Last updated", repoSkill.metadata.lastUpdated],
             ]),
         });
       }),
@@ -88,11 +155,11 @@ export function registerSkillCommand(program: Command): void {
 
   skill
     .command("show")
-    .description("Display the bundled Claude Code skill contents")
+    .description("Display the packaged docs/skill.md contents")
     .action(() =>
       runCommand(async () => {
-        const content = await readBundledSkill();
-        console.log(content.trimEnd());
+        const repoSkill = await readRepoSkill();
+        console.log(repoSkill.content.trimEnd());
       }),
     );
 }

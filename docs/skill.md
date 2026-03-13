@@ -1,399 +1,195 @@
-# linkedin-cli
+---
+skill_version: "0.1.0"
+last_updated: "2026-03-13"
+cli_version_compatible: "0.1.0"
+---
 
-Use `linkedin-cli` to read data from a logged-in LinkedIn account through the `linkedin` or `linkedin-cli` command.
+Always read this file before executing any `linkedin-cli` command.
 
-## Important rules
+# LinkedIn-CLI Agent Skill
 
-1. Always prefer `--json` so your tool use stays structured and parseable.
-2. If a command fails with an authentication error, run `linkedin login` and ask the user to complete the browser sign-in flow.
-3. Treat this CLI as read-only. Do not assume it can safely mutate LinkedIn state.
-4. For list-style commands, add `--limit N` when you only need a small sample.
-5. The CLI prefers browser-backed requests using its saved Playwright Chrome profile, so auth state lives in both `session.json` and `~/.config/linkedin-cli/browser-profile/`.
-6. The CLI now supports shared output modes: `--json`, `--csv`, `--md`, `--html`, `--output <filepath>`, `--copy`, and `--quiet`.
+## Self-Maintenance Protocol
 
-## Authentication commands
+When working on this codebase, follow these rules:
+
+1. After adding or modifying any command, update this skill file to match. Include the command, its flags, a description, and at least one natural language mapping.
+2. After fixing a bug or discovering a workaround for a Voyager API quirk, add it to Known Limitations or Error Handling so future sessions do not repeat the investigation.
+3. After any update to this file, bump `skill_version` at the patch level, update `last_updated`, and add a Changelog entry.
+4. Run `npm run validate-skill` before committing to make sure this file matches the CLI.
+
+This file is the agent's memory. Keeping it accurate saves hours of re-discovery in future sessions.
+
+## Instructions
+
+1. Prefer `--json` for retrieval so results stay structured and parseable.
+2. Treat `linkedin-cli` as read-only. Do not assume it can post, message, connect, or mutate LinkedIn state.
+3. Use `--limit N` for list commands unless the user explicitly wants a large result set.
+4. For recurring watchlist analysis, prefer `linkedin monitor watchlist --period 2d --json`.
+5. If a command returns an auth failure, tell the user to run `linkedin login`.
+6. If a command returns rate limiting, wait and retry once only.
+7. If the packaged skill may be stale, run `linkedin skill status` and then `linkedin skill sync`.
+
+## Available Commands
+
+### Core auth and status
 
 ```bash
 linkedin login
-linkedin status --json
+linkedin status
 linkedin logout
 ```
 
-- `linkedin login`: opens Chrome with a persistent profile, waits for a manual LinkedIn sign-in, then saves the `li_at` and `JSESSIONID` cookies.
-- `linkedin status`: validates the saved session against the Voyager `/me` endpoint.
-- `linkedin logout`: deletes the saved session file and resets the CLI-only browser profile.
+- `linkedin login`: opens a real Chrome window and saves LinkedIn auth into the local CLI config.
+- `linkedin status`: verifies the saved session and returns the authenticated member snapshot.
+- `linkedin logout`: clears the saved session and the CLI-managed browser profile.
 
-## Profile commands
+### Profile and company
 
 ```bash
-linkedin profile --json
-linkedin profile --deep --json
-linkedin profile https://www.linkedin.com/in/some-person/ --json
-linkedin profile https://www.linkedin.com/in/some-person/ --deep --json
-linkedin profile https://www.linkedin.com/in/some-person/ --posts --period 14d --limit 20 --json
+linkedin profile [linkedinUrl]
+linkedin company <company> [section]
 ```
 
-- `linkedin profile`: returns the viewer profile.
-- `linkedin profile <linkedin-url>`: returns another member's profile when the public identifier can be resolved.
-- `linkedin profile --deep`: returns a best-effort deeper profile object with structured arrays for experience, education, skills, featured items, recommendations, and activity stats.
-- `linkedin profile <linkedin-url> --posts`: returns a best-effort scrape of that member's recent activity posts, filtered by `--period` when provided.
+- `linkedin profile [linkedinUrl]`: viewer profile by default, or another public profile if a URL/identifier is given.
+- `linkedin profile --deep`: best-effort deeper profile scrape.
+- `linkedin profile --posts --period 14d --limit 20`: recent public posts from the target profile.
+- `linkedin company <company> [section]`: company overview by default.
+- Valid company sections today: `employees`, `posts`.
 
-Output fields usually include:
-
-- `fullName`
-- `headline`
-- `summary`
-- `location`
-- `industry`
-- `profileUrl`
-- `experience`
-- `education`
-- `skills`
-- `featured`
-- `activity.postsLast30Days`
-- `items[].text`
-- `items[].publishedAt`
-- `items[].url`
-
-## Connections commands
+### Connections, feed, content, and analytics
 
 ```bash
-linkedin connections --json
-linkedin connections list --json
-linkedin connections list --company "Google" --title "engineer" --json
-linkedin connections --search "John" --json
-linkedin connections --count --json
-linkedin connections --recent --limit 20 --json
+linkedin connections
+linkedin connections list
 linkedin connections export
-linkedin connections list --limit 50 --csv
-linkedin connections list --limit 50 --output connections.csv
-linkedin connections mutual https://www.linkedin.com/in/some-person/ --json
+linkedin connections mutual <linkedinUrl>
+linkedin feed
+linkedin post <postUrl>
+linkedin posts <postUrl>
+linkedin content stats
+linkedin content search <query>
+linkedin content hashtags <hashtag>
+linkedin analytics
 ```
 
-- `linkedin connections`: lists first-degree connections.
-- `linkedin connections list`: explicit list command with company/title filters.
-- `linkedin connections --search`: filters by name or keywords.
-- `linkedin connections --count`: returns a connection count payload.
-- `linkedin connections --recent`: returns the same connection dataset, biased toward the newest page of results.
-- `linkedin connections export`: emits CSV by default unless another explicit output format is requested.
-- `linkedin connections mutual <url-or-username>`: best-effort mutual connection lookup. If LinkedIn does not expose mutuals to the current account, expect `available: false` with a note instead of a crash.
+- `linkedin connections`: default connection list with filters like `--search`, `--company`, `--title`, `--count`, `--recent`.
+- `linkedin connections list`: explicit list surface.
+- `linkedin connections export`: flat export, usually paired with `--csv` or `--output`.
+- `linkedin connections mutual <linkedinUrl>`: best-effort mutual connection lookup.
+- `linkedin feed`: viewer feed, with `--mine` and `--stats`.
+- `linkedin post <postUrl>` and `linkedin posts <postUrl>`: post detail plus optional `--comments` and `--reactions`.
+- `linkedin content stats`: recent content performance summary.
+- `linkedin content search <query>`: post/article-style search, with optional `--author` and `--period`.
+- `linkedin content hashtags <hashtag>`: hashtag follower and recent-post snapshot.
+- `linkedin analytics`: creator analytics, with `--post` and `--followers`.
 
-Useful fields:
-
-- `items[].fullName`
-- `items[].headline`
-- `items[].currentTitle`
-- `items[].currentCompany`
-- `items[].location`
-- `items[].profileUrl`
-- `total`
-
-## Content commands
+### Messaging, notifications, network, search, and jobs
 
 ```bash
-linkedin content stats --period 30d --json
-linkedin content stats --period 90d --top 5 --json
-linkedin content search "enterprise AI" --json
-linkedin content search "enterprise AI" --author https://www.linkedin.com/in/some-person/ --period 30d --json
-linkedin content hashtags artificialintelligence --json
+linkedin messages
+linkedin notifications
+linkedin network invitations
+linkedin network suggestions
+linkedin network map
+linkedin network viewers
+linkedin search people <query>
+linkedin search companies <query>
+linkedin search jobs <query>
+linkedin search posts <query>
+linkedin jobs search <query>
+linkedin jobs detail <jobUrl>
+linkedin jobs saved
+linkedin jobs applied
+linkedin jobs recommended
 ```
 
-- `linkedin content stats`: returns a performance summary for the authenticated member's recent posts over the requested period.
-- `linkedin content search`: searches public post/article-style results on LinkedIn and returns structured recent content items.
-- `linkedin content hashtags`: best-effort hashtag research using LinkedIn's current hashtag/search routing. Expect `followerCount: null` on some accounts.
+- `linkedin messages`: recent conversation snapshot, with `--unread` and `--search`.
+- `linkedin notifications`: recent notifications, with `--unread`.
+- `linkedin network invitations`: received by default, `--sent` for sent.
+- `linkedin network suggestions`: people-you-may-know style results.
+- `linkedin network map`: aggregated network breakdown.
+- `linkedin network viewers`: recent profile viewers when LinkedIn exposes them.
+- `linkedin search ...`: search people, companies, jobs, or posts.
+- `linkedin jobs search <query>`: job search with filters like `--location`, `--company`, `--remote`, `--hybrid`, `--onsite`.
+- `linkedin jobs detail <jobUrl>`: full listing scrape.
+- `linkedin jobs saved|applied|recommended`: jobs tracker buckets.
 
-Useful fields:
-
-- `period`
-- `totalPosts`
-- `totalReactions`
-- `totalComments`
-- `totalReposts`
-- `postingFrequencyPerWeek`
-- `bestPost`
-- `topPosts`
-- `items[].authorName`
-- `items[].authorHeadline`
-- `items[].text`
-- `items[].hashtags`
-- `relatedHashtags`
-
-## Feed and post commands
+### Monitor and skill management
 
 ```bash
-linkedin feed --json
-linkedin feed --mine --json
-linkedin feed --mine --stats --json
-linkedin post "<post-url>" --comments --reactions --json
-linkedin posts "<post-url>" --comments --reactions --json
+linkedin monitor [preset]
+linkedin skill install
+linkedin skill uninstall
+linkedin skill status
+linkedin skill show
+linkedin skill sync
+linkedin skill version
 ```
 
-- `linkedin feed`: attempts to return recent feed items from the viewer feed.
-- `linkedin feed --mine`: returns the viewer's recent posts.
-- `linkedin feed --mine --stats`: same as above, with engagement stats surfaced in terminal output.
-- `linkedin post <post-url>`: opens the post page and returns post text, counts, and optional top-level comments and reaction totals.
-- `linkedin posts <post-url>`: alias for `linkedin post`.
+- `linkedin monitor [preset]`: runs the built-in watchlist monitor. The only supported preset today is `watchlist`.
+- `linkedin skill install`: copies this file into the local config and Claude Code skill locations.
+- `linkedin skill uninstall`: removes installed skill copies.
+- `linkedin skill status`: compares installed skill hashes against the packaged repo skill.
+- `linkedin skill show`: prints this file.
+- `linkedin skill sync`: overwrites installed skill copies with the packaged version.
+- `linkedin skill version`: prints `skill_version`, `last_updated`, and `cli_version_compatible`.
 
-Useful fields:
+## Natural Language Mappings
 
-- `items[].actorName`
-- `items[].text`
-- `items[].publishedAt`
-- `items[].likes`
-- `items[].comments`
-- `items[].reposts`
-- `commentList[].authorName`
-- `commentList[].authorHeadline`
-- `reactionBreakdown.total`
+- "How many connections do I have?" → `linkedin connections --count --json`
+- "Show me my recent posts." → `linkedin feed --mine --stats --json`
+- "Pull Ruben Hassid's last 14 days of posts." → `linkedin profile https://www.linkedin.com/in/ruben-hassid/ --posts --period 14d --limit 20 --json`
+- "What has Anthropic posted this week?" → `linkedin company "Anthropic" posts --period 7d --limit 20 --json`
+- "Show me unread LinkedIn messages." → `linkedin messages --unread --json`
+- "Find AI engineers in Israel." → `linkedin search people "AI engineer" --location "Israel" --json`
+- "Find AI-related jobs in Israel." → `linkedin jobs search "AI" --location "Israel" --json`
+- "What are the top themes across my watchlist?" → `linkedin monitor watchlist --period 2d --json`
+- "Is the skill file installed and current?" → `linkedin skill status --json`
+- "Refresh the local skill copy." → `linkedin skill sync --json`
 
-## Messaging commands
+## Chained Workflows
 
-```bash
-linkedin messages --json
-linkedin messages --unread --json
-linkedin messages --search "pricing" --json
-```
+### Profile research
 
-- `linkedin messages`: recent conversations.
-- `linkedin messages --unread`: only unread conversations.
-- `linkedin messages --search`: keyword filter against the recent conversation snapshot.
-- `linkedin messages` may fall back to a browser-page scrape when LinkedIn's legacy conversations endpoint returns `500`, so snippets remain best-effort.
+1. `linkedin profile <url> --deep --json`
+2. `linkedin profile <url> --posts --period 14d --limit 20 --json`
+3. `linkedin connections mutual <url> --json`
 
-Useful fields:
+### Company intelligence
 
-- `items[].title`
-- `items[].participants`
-- `items[].snippet`
-- `items[].unread`
+1. `linkedin company "<name>" --json`
+2. `linkedin company "<name>" employees --limit 20 --json`
+3. `linkedin company "<name>" posts --period 7d --limit 20 --json`
 
-## Notification commands
+### Job hunt workflow
 
-```bash
-linkedin notifications --json
-linkedin notifications --unread --json
-```
+1. `linkedin jobs search "AI" --location "Israel" --json`
+2. `linkedin jobs detail "<job-url>" --json`
+3. `linkedin company "<company-name>" --json`
 
-Useful fields:
+### Daily watchlist briefing
 
-- `items[].text`
-- `items[].unread`
-- `items[].occurredAt`
+1. `linkedin monitor watchlist --period 2d --json`
+2. For any standout post URL from `topPosts`, run `linkedin post <postUrl> --comments --reactions --json`
+3. Summarize the result into a markdown brief for the user
 
-## Network commands
+## Known Limitations
 
-```bash
-linkedin network invitations --json
-linkedin network invitations --sent --json
-linkedin network suggestions --json
-linkedin network map --json
-linkedin network viewers --json
-```
+- LinkedIn uses undocumented APIs and page structures. Commands can break without notice.
+- `linkedin messages` may fall back to a browser-page scrape, so snippets are best-effort.
+- Full liker identity is not exposed consistently. Reaction totals are more reliable than full liker lists.
+- `linkedin jobs recommended` is a best-effort bucket, not a dedicated recommendation endpoint.
+- `linkedin company ... posts` and `linkedin profile ... --posts` are DOM scrapes and can occasionally return fewer posts than requested if LinkedIn lazy-loads less content.
+- `linkedin monitor watchlist` is built around the current curated source set and is not yet a general custom-watchlist system.
 
-- `linkedin network invitations`: pending received invites.
-- `linkedin network invitations --sent`: sent invitations.
-- `linkedin network suggestions`: people LinkedIn suggests you may know.
-- `linkedin network map`: summarizes sampled connections by company, industry, location, seniority, and recent growth buckets.
-- `linkedin network viewers`: returns recent profile viewers when LinkedIn exposes them, otherwise an `empty` or `restricted` availability payload.
+## Error Handling
 
-Useful fields:
+- Auth failure: tell the user to run `linkedin login`.
+- Rate limit or throttle: wait and retry once. If it fails again, tell the user LinkedIn is throttling requests.
+- Skill drift: run `linkedin skill status`; if any target is out of sync, run `linkedin skill sync`.
+- Watchlist source timeout: rerun `linkedin monitor watchlist` once. If the same source repeatedly times out, fall back to running that source manually with `profile --posts` or `company ... posts`.
+- Empty results: treat them as real unless there is strong evidence of an auth/session issue. LinkedIn often returns true empty states.
 
-- `topCompanies`
-- `topLocations`
-- `seniorityBreakdown`
-- `growthLast6Months`
-- `availability`
-- `message`
+## Changelog
 
-## Company commands
-
-```bash
-linkedin company "Anthropic" --json
-linkedin company "Anthropic" employees --limit 20 --json
-linkedin company "Anthropic" employees --title "engineer" --json
-linkedin company "Anthropic" posts --period 2d --limit 10 --json
-```
-
-- `linkedin company <url-or-name>`: resolves a company through LinkedIn search, then scrapes the company about page.
-- `linkedin company <url-or-name> employees`: returns associated employees, preferring a current-company search filter when LinkedIn exposes one.
-- `linkedin company <url-or-name> posts`: scrapes the company posts feed directly and works better than generic content search for daily monitoring.
-
-Useful fields:
-
-- `name`
-- `description`
-- `industry`
-- `website`
-- `followers`
-- `employeeCount`
-- `employeesSearchUrl`
-- `items[].fullName`
-- `items[].title`
-- `items[].location`
-- `items[].connectionDegree`
-- `items[].authorName`
-- `items[].text`
-- `items[].publishedAt`
-- `items[].likes`
-- `items[].comments`
-- `items[].reposts`
-
-## Analytics commands
-
-```bash
-linkedin analytics --json
-linkedin analytics --post "<post-url>" --json
-linkedin analytics --followers --json
-```
-
-- `linkedin analytics`: aggregates recent post engagement into a last-30-days snapshot.
-- `linkedin analytics --post`: returns engagement details for one recent post.
-- `linkedin analytics --followers`: returns the available follower snapshot from the current profile response.
-
-Useful fields:
-
-- `postsAnalyzed`
-- `totalLikes`
-- `totalComments`
-- `totalReposts`
-- `topPosts`
-
-## Monitor command
-
-```bash
-linkedin monitor watchlist --period 2d --json
-```
-
-- `linkedin monitor watchlist`: runs the built-in influencer + company watchlist with per-source timeout, retry, and backoff.
-- This is the safest way to run the recurring daily brief workflow because it reuses the browser-backed transport while continuing past individual source failures.
-
-Useful fields:
-
-- `sources[].name`
-- `sources[].status`
-- `sources[].postsInWindow`
-- `headlineBriefing`
-- `sourceSummaries`
-- `trendingTopics`
-- `notableMentions`
-- `topPosts`
-- `underperformers`
-- `signalsForMark`
-
-## Search commands
-
-```bash
-linkedin search people "AI engineer" --json
-linkedin search people "AI engineer" --title "senior" --location "Israel" --json
-linkedin search companies "cybersecurity" --json
-linkedin search jobs "product manager" --json
-linkedin search posts "enterprise AI" --json
-```
-
-Each search payload returns:
-
-- `items[].title`
-- `items[].subtitle`
-- `items[].location`
-- `items[].url`
-
-People search also includes:
-
-- `items[].connectionDegree`
-- `items[].currentTitle`
-- `items[].currentCompany`
-
-## Jobs commands
-
-```bash
-linkedin jobs search "product manager" --location "Tel Aviv" --json
-linkedin jobs detail "https://www.linkedin.com/jobs/view/123/" --json
-linkedin jobs saved --json
-linkedin jobs applied --json
-linkedin jobs recommended --json
-```
-
-- `linkedin jobs search`: current live jobs search with optional location/company/workplace filters.
-- `linkedin jobs detail`: job detail page scrape with title, company, description, company metadata, and best-effort inferred skills.
-- `linkedin jobs saved`: reads the jobs tracker saved bucket. Empty accounts legitimately return `[]`.
-- `linkedin jobs applied`: reads the jobs tracker applied bucket. Empty accounts legitimately return `[]`.
-- `linkedin jobs recommended`: best-effort wrapper around jobs search and not yet a dedicated recommendation endpoint.
-
-Useful fields:
-
-- `items[].title`
-- `items[].company`
-- `items[].location`
-- `items[].workplaceType`
-- `description`
-- `employmentType`
-- `applicantCount`
-- `companyIndustry`
-
-## Natural language mapping
-
-- "Show the comments on this post" -> `linkedin post "<post-url>" --comments --reactions --json`
-- "How are my posts performing?" -> `linkedin content stats --period 30d --json`
-- "Search LinkedIn posts about enterprise AI" -> `linkedin content search "enterprise AI" --json`
-- "What is happening under #AI?" -> `linkedin content hashtags ai --json`
-- "Find product manager jobs in Tel Aviv" -> `linkedin jobs search "product manager" --location "Tel Aviv" --json`
-- "Show me this job in detail" -> `linkedin jobs detail "<job-url>" --json`
-- "What jobs have I saved?" -> `linkedin jobs saved --json`
-- "What jobs have I applied to?" -> `linkedin jobs applied --json`
-- "Pull Ruben Hassid's last 20 posts from the last two weeks" -> `linkedin profile https://www.linkedin.com/in/ruben-hassid/ --posts --period 14d --limit 20 --json`
-
-## Natural language query mapping
-
-- "How many connections do I have?" -> `linkedin connections --count --json`
-- "Give me a deep read of this profile" -> `linkedin profile <linkedin-url> --deep --json`
-- "Show me my recent posts with engagement" -> `linkedin feed --mine --stats --json`
-- "How are my posts performing?" -> `linkedin content stats --period 30d --json`
-- "Who do I know at Google?" -> `linkedin connections list --company "Google" --json`
-- "Export my connections to CSV" -> `linkedin connections list --output connections.csv`
-- "Who are the mutual connections between me and X?" -> `linkedin connections mutual <url> --json`
-- "Find AI engineers in my network" -> `linkedin search people "AI engineer" --json`
-- "Find senior AI engineers in Israel" -> `linkedin search people "AI engineer" --title "senior" --location "Israel" --json`
-- "What are my unread messages?" -> `linkedin messages --unread --json`
-- "Show my post analytics for last month" -> `linkedin analytics --json`
-- "Pull my profile summary" -> `linkedin profile --json`
-- "Search LinkedIn for cybersecurity companies" -> `linkedin search companies "cybersecurity" --json`
-- "Show my pending invitations" -> `linkedin network invitations --json`
-- "Give me a network breakdown" -> `linkedin network map --json`
-- "Who viewed my profile recently?" -> `linkedin network viewers --json`
-- "What's the company info for Anthropic?" -> `linkedin company "Anthropic" --json`
-- "Show me Anthropic employees" -> `linkedin company "Anthropic" employees --json`
-- "Pull this person's recent posts" -> `linkedin profile <linkedin-url> --posts --period 14d --limit 20 --json`
-
-## Combining commands for complex queries
-
-Use small, composable commands and merge them in your agent runtime:
-
-```bash
-linkedin profile --json
-linkedin connections --count --json
-linkedin analytics --json
-```
-
-Examples:
-
-- Relationship snapshot: combine `linkedin profile --json` with `linkedin connections --count --json`.
-- Deep person brief: combine `linkedin profile <linkedin-url> --deep --json` with `linkedin connections list --search "<name>" --json`.
-- Networking prep: combine `linkedin profile <linkedin-url> --deep --json` with `linkedin connections mutual <linkedin-url> --json`.
-- Recent-post research: combine `linkedin profile <linkedin-url> --posts --period 14d --limit 20 --json` with `linkedin profile <linkedin-url> --deep --json`.
-- Company intelligence: combine `linkedin company "<name>" --json` with `linkedin company "<name>" employees --json`.
-- Content health: combine `linkedin feed --mine --stats --json` with `linkedin analytics --json`.
-- Phase 1 content check: combine `linkedin content stats --period 30d --json` with `linkedin feed --mine --stats --json`.
-- Inbox triage: combine `linkedin messages --unread --json` with `linkedin notifications --unread --json`.
-- Recruiting lookup: combine `linkedin search people "AI engineer" --json` with `linkedin connections --search "AI engineer" --json`.
-
-## Output interpretation
-
-- Terminal tables are for humans.
-- `--json` is for agents, scripts, and `jq`.
-- `--csv` is best for flat list datasets like connections, employees, and jobs.
-- `--md` is useful for sharing profile briefs and report-like summaries.
-- `--html` is best for richer report exports such as company snapshots and content-performance summaries.
-- `--output <filepath>` infers format from `.json`, `.csv`, `.md`, and `.html` extensions.
-- `--copy` copies the rendered output to the clipboard after formatting.
-- `--quiet` suppresses wrapper text and returns the most essential value or line-oriented list.
-- Counts may come from LinkedIn paging metadata when available, otherwise from the returned item count.
-- Some Voyager endpoints are undocumented and may change. If fields disappear or arrays are empty, retry with `linkedin status --json` first to confirm the session is still valid.
+- 2026-03-13: Initial public skill structure added with self-maintenance protocol, command catalog, skill hash/version workflow, and watchlist monitor coverage.
