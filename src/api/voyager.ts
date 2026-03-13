@@ -1,6 +1,7 @@
 import type {
   AnalyticsSummary,
   CompanyEmployeeSummary,
+  CompanyPostSummary,
   CompanyProfileSummary,
   ConnectionSummary,
   ContentSearchResultSummary,
@@ -1003,6 +1004,33 @@ function dedupeRepeatedText(value: string | undefined): string | undefined {
   return normalized;
 }
 
+function dedupeRepeatedLabel(value: string | undefined): string | undefined {
+  const initial = dedupeRepeatedText(value);
+  if (!initial) {
+    return undefined;
+  }
+  let current: string = initial;
+
+  for (let index = 0; index < 3; index += 1) {
+    const squashed: string = current.replace(/\s+/g, "");
+    const half = Math.floor(squashed.length / 2);
+    if (squashed.length % 2 === 0 && squashed.slice(0, half).toLowerCase() === squashed.slice(half).toLowerCase()) {
+      current = squashed.slice(0, half);
+      continue;
+    }
+
+    const repeatedWords = current.match(/^(.+?)\s*\1$/i);
+    if (repeatedWords?.[1]) {
+      current = normalizeLine(repeatedWords[1]);
+      continue;
+    }
+
+    break;
+  }
+
+  return normalizeLine(current) || undefined;
+}
+
 function cleanProfileActivityText(value: string | undefined): string | undefined {
   const normalized = normalizeLine(value ?? "");
   if (!normalized) {
@@ -1018,6 +1046,41 @@ function cleanProfileActivityText(value: string | undefined): string | undefined
     .trim();
 
   return cleaned || undefined;
+}
+
+function cleanCompanyPostText(value: string | undefined): string | undefined {
+  const base = cleanProfileActivityText(value);
+  if (!base) {
+    return undefined;
+  }
+
+  const cleaned = base
+    .replace(
+      /^(?:\d+\s*(?:minutes?|hours?|days?|weeks?|months?|[hdwm])\s*(?:ago)?\s*•?\s*)?(?:edited\s*•?\s*)?(?:visible to anyone on or off linkedin\s*)+/i,
+      "",
+    )
+    .replace(/^(?:\d+\s*(?:minutes?|hours?|days?|weeks?|months?|[hdwm])\s*(?:ago)?\s*•?\s*)+/i, "")
+    .replace(/^follow\s+/i, "")
+    .trim();
+
+  return cleaned || undefined;
+}
+
+function cleanCompanyAuthorName(value: string | undefined): string | undefined {
+  const withoutFollowers = normalizeLine((value ?? "").replace(/\s*\d[\d,.\s]*followers?.*$/i, ""));
+  if (!withoutFollowers) {
+    return undefined;
+  }
+
+  return dedupeRepeatedLabel(withoutFollowers);
+}
+
+function buildCompanyPostFingerprint(item: Pick<CompanyPostSummary, "authorName" | "publishedAt" | "text" | "contentType">): string {
+  const publishedAt = normalizeLine((item.publishedAt ?? "").replace(/•/g, " "));
+  const text = normalizeLine(item.text ?? "");
+  const authorName = normalizeLine(item.authorName ?? "");
+  const contentType = normalizeLine(item.contentType ?? "");
+  return normalizeLine(`${authorName}|${publishedAt}|${text}|${contentType}`).toLowerCase();
 }
 
 function isRelativeTimeLine(value: string): boolean {
@@ -1874,6 +1937,25 @@ export class VoyagerApi {
   async getCompanyProfile(identifier: string): Promise<CompanyProfileSummary> {
     const company = await this.resolveCompanyTarget(identifier);
     return this.scrapeCompanyProfilePage(company.url, company.searchResult);
+  }
+
+  async getCompanyPosts(
+    identifier: string,
+    options: {
+      limit: number;
+      periodDays?: number;
+    },
+  ): Promise<PaginatedResult<CompanyPostSummary>> {
+    const company = await this.resolveCompanyTarget(identifier);
+    const items = await this.scrapeCompanyPostsPage(company.url, options.limit, options.periodDays);
+
+    return {
+      items,
+      start: 0,
+      count: items.length,
+      total: items.length,
+      nextStart: undefined,
+    };
   }
 
   async getCompanyEmployees(
@@ -2737,6 +2819,186 @@ export class VoyagerApi {
       total: scraped.length,
       nextStart: undefined,
     };
+  }
+
+  private async scrapeCompanyPostsPage(
+    url: string,
+    limit: number,
+    periodDays?: number,
+  ): Promise<CompanyPostSummary[]> {
+    const normalizedUrl = url.replace(/\/+$/, "");
+    const page = await this.client.openPage(`${normalizedUrl}/posts/?feedView=all`);
+    await page.waitForTimeout(3000);
+
+    for (let index = 0; index < 10; index += 1) {
+      const currentCount = await page.locator(".feed-shared-update-v2, .fie-impression-container").count();
+      if (currentCount >= limit) {
+        break;
+      }
+
+      await page.evaluate(() => {
+        for (const button of Array.from(document.querySelectorAll("button, a"))) {
+          const text = button.textContent?.replace(/\s+/g, " ").trim().toLowerCase();
+          if (text && /^(show more|load more|see more)$/i.test(text)) {
+            (button as HTMLElement).click();
+          }
+        }
+      });
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 1.75));
+      await page.waitForTimeout(1200);
+    }
+
+    const items = await page.evaluate((maxItems) => {
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const isLikelyHeadlineLocal = (value: string) => {
+        const normalized = normalize(value);
+        return (
+          normalized.length <= 140 &&
+          !/https?:\/\//i.test(normalized) &&
+          !/visible to anyone on or off linkedin/i.test(normalized) &&
+          !/^\d+[hdwm]\s*•?$/i.test(normalized) &&
+          !/^(follow|connect|message|like|comment|repost|send|add a comment|open emoji keyboard)$/i.test(normalized) &&
+          !/^(verified|influencer)(\s+•.*)?$|^•\s*(1st|2nd|3rd\+)$|^\d[\d,.]*\s+followers?$/i.test(normalized)
+        );
+      };
+
+      const cards = Array.from(document.querySelectorAll(".fie-impression-container, .feed-shared-update-v2")) as HTMLElement[];
+      const results: Array<{
+        id?: string;
+        authorName?: string;
+        text?: string;
+        publishedAt?: string;
+        contentType?: "post" | "article" | "document" | "video" | "poll";
+        url?: string;
+        likes?: number;
+        comments?: number;
+        reposts?: number;
+        hashtags: string[];
+      }> = [];
+      const seen = new Set<string>();
+
+      for (const card of cards) {
+        const activityRoot = (card.querySelector('[data-urn^="urn:li:activity:"]') ?? card) as HTMLElement;
+        const activityUrn = activityRoot.getAttribute("data-urn") ?? undefined;
+        const activityId = activityUrn?.match(/activity:(\d+)/)?.[1];
+        const url = activityId ? `https://www.linkedin.com/feed/update/urn:li:activity:${activityId}/` : undefined;
+        if (url && seen.has(url)) {
+          continue;
+        }
+
+        const lines = (card.innerText ?? "")
+          .split("\n")
+          .map(normalize)
+          .filter(Boolean)
+          .filter((line, index, all) => all.indexOf(line) === index);
+
+        if (!lines.length) {
+          continue;
+        }
+
+        const authorLinks = Array.from(card.querySelectorAll('a[href*="/company/"], a[href*="/in/"]')) as HTMLAnchorElement[];
+        const authorLink = authorLinks.find((anchor) => normalize(anchor.textContent ?? "").length > 0) ?? authorLinks[0];
+        const authorName = authorLink ? normalize(authorLink.textContent ?? "").split("•")[0]?.trim() : lines[0];
+        const publishedAt = lines.find((line) => /visible to anyone on or off linkedin/i.test(line) || /^\d+\s+(minutes?|hours?|days?|weeks?|months?)\s+ago/i.test(line) || /^\d+[hdwm]/i.test(line));
+        const publishedIndex = publishedAt ? lines.indexOf(publishedAt) : -1;
+        const actionIndex = lines.findIndex((line) => /^(follow|connect|message)$/i.test(line));
+        const statsIndex = lines.findIndex((line) => /^\d[\d,]*$|^\d+\s+comments$|^\d+\s+reposts?$/i.test(line));
+        const headline = lines.find((line, index) =>
+          index > 0 &&
+          index < (publishedIndex >= 0 ? publishedIndex : lines.length) &&
+          line !== authorName &&
+          line !== "·" &&
+          !/^(follow|connect|message)$/i.test(line) &&
+          !/^(premium|following)$/i.test(line) &&
+          !/^view my newsletter$/i.test(line) &&
+          isLikelyHeadlineLocal(line),
+        );
+        const hashtags = Array.from(card.querySelectorAll('a[href*="keywords=%23"], a[href*="origin=HASH_TAG_FROM_FEED"]'))
+          .map((anchor) => normalize((anchor as HTMLAnchorElement).textContent ?? "").replace(/^hashtag/i, "").replace(/^#/, "").trim())
+          .filter(Boolean);
+        const text = lines
+          .slice(publishedIndex >= 0 ? publishedIndex + 1 : actionIndex >= 0 ? actionIndex + 1 : 3, statsIndex >= 0 ? statsIndex : undefined)
+          .filter((line) => line !== authorName && line !== headline && line !== publishedAt)
+          .filter((line) => line !== "·")
+          .filter((line) => !/^visible to anyone on or off linkedin$/i.test(line))
+          .filter((line) => !/^(premium|following)$/i.test(line))
+          .filter((line) => !/^view my newsletter$/i.test(line))
+          .filter((line) => !/^(…more|like|comment|repost|send|open emoji keyboard|feed post)$/i.test(line))
+          .filter((line) => !/^(activate to view larger image|your document has finished loading)$/i.test(line))
+          .join(" ")
+          .trim();
+        const likes = lines.find((line) => /^\d[\d,]*$/.test(line));
+        const comments = lines.find((line) => /^\d+\s+comments$/i.test(line));
+        const reposts = lines.find((line) => /^\d+\s+reposts?$/i.test(line));
+        const joined = lines.join(" ").toLowerCase();
+        const contentType = joined.includes("newsletter")
+          ? "article"
+          : joined.includes("document is loading") || joined.includes("job by")
+            ? "document"
+            : joined.includes("media is loading") || joined.includes("playmedia is loading")
+              ? "video"
+              : joined.includes("votes") || joined.includes("week left") || joined.includes("days left")
+                ? "poll"
+                : "post";
+
+        results.push({
+          id: activityId,
+          authorName,
+          text: text || undefined,
+          publishedAt,
+          contentType,
+          url,
+          likes: likes ? Number.parseInt(likes.replace(/,/g, ""), 10) : undefined,
+          comments: comments ? Number.parseInt(comments, 10) : undefined,
+          reposts: reposts ? Number.parseInt(reposts, 10) : undefined,
+          hashtags,
+        });
+
+        if (url) {
+          seen.add(url);
+        }
+
+        if (results.length >= maxItems) {
+          break;
+        }
+      }
+
+      return results;
+    }, Math.max(limit, 20));
+
+    const normalizedItems = items
+      .map((item) => ({
+        ...item,
+        authorName: cleanCompanyAuthorName(item.authorName),
+        text: cleanCompanyPostText(dedupeRepeatedText(item.text)),
+        hashtags: uniqueStrings((item.hashtags ?? []).map((tag) => normalizeHashtag(tag))),
+        raw: item,
+      }))
+      .filter((item) => item.authorName || item.text)
+      .filter((item) => (periodDays ? isWithinPeriod(item.publishedAt, periodDays) : true));
+
+    const score = (candidate: CompanyPostSummary) => (candidate.url ? 4 : 0) + (candidate.id ? 3 : 0) + ((candidate.text?.length ?? 0) > 80 ? 2 : 1);
+    const merged = new Map<string, CompanyPostSummary>();
+    for (const item of normalizedItems) {
+      const fingerprintKey = buildCompanyPostFingerprint(item);
+      const urlKey = item.url ? normalizeLine(item.url).toLowerCase() : "";
+      const existing =
+        merged.get(fingerprintKey) ??
+        (urlKey ? merged.get(urlKey) : undefined);
+      const dedupeKey = fingerprintKey || urlKey;
+
+      if (!dedupeKey) {
+        continue;
+      }
+      if (!existing || score(item) > score(existing)) {
+        merged.set(dedupeKey, item);
+        if (urlKey) {
+          merged.set(urlKey, item);
+        }
+      }
+    }
+
+    return [...new Set(merged.values())].slice(0, limit);
   }
 
   private async scrapeDeepProfilePage(profileUrl?: string): Promise<{

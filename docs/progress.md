@@ -251,6 +251,66 @@ Current real-account outcome:
 - `network viewers` is now good enough to use
 - `profile --posts --period 14d --limit 20` returned 19 recent Ruben Hassid posts in live validation
 
+## Company Posts Validation
+
+Added a first-class company-posts path:
+
+- `linkedin company <url-or-name> posts --period 2d --limit 10 --json`
+
+Validated live against:
+
+- `linkedin company https://www.linkedin.com/company/openai/ posts --period 2d --limit 5 --json`
+- `linkedin company https://www.linkedin.com/company/anthropicresearch/ posts --period 2d --limit 5 --json`
+- `linkedin company https://www.linkedin.com/company/google-gemini-ai/ posts --period 2d --limit 5 --json`
+
+What changed:
+
+- company posts now scrape the dedicated `/posts/?feedView=all` page instead of relying on generic content search
+- duplicate cards are merged so URL-backed and text-backed copies collapse into a single post
+- company page names are normalized even when LinkedIn repeats the page title and follower count in the DOM
+- company post text now strips LinkedIn boilerplate like relative-time labels, visibility labels, and `Follow`
+
+Current outcome:
+
+- OpenAI returned 1 clean post in the 48-hour window
+- Anthropic returned 1 clean post in the 48-hour window
+- Google Gemini returned 3 clean posts in the 48-hour window
+
+This is now strong enough to support the daily influencer + company monitor workflow.
+
+## Monitor Command Validation
+
+Added a dedicated monitor orchestration command:
+
+- `linkedin monitor watchlist --period 2d --json`
+
+What it does:
+
+- runs the built-in people + company watchlist in one process
+- wraps each source fetch with timeout, retry, and backoff controls
+- normalizes the collected posts into one report object with headline briefing, per-source summaries, trending topics, top posts, underperformers, and actionable signals
+
+Validated live with:
+
+- `node dist/cli.js monitor watchlist --period 2d --timeout-ms 60000 --retries 0 --json --output /tmp/linkedin-monitor-watchlist.json`
+
+Result:
+
+- all 7 sources completed without hanging
+- 19 posts were captured in the 48-hour window
+- successful breakdown:
+  - Ruben Hassid: 6
+  - Shrey Shah: 4
+  - Ziv Peled: 2
+  - Matt Shumer: 0
+  - OpenAI: 2
+  - Anthropic: 1
+  - Google Gemini: 4
+
+Generated report artifact:
+
+- `reports/daily-linkedin-intelligence-2026-03-13.md`
+
 ## Shared Output Validation
 
 Validated from the fresh `dist` build on the real session:

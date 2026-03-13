@@ -282,9 +282,17 @@ export interface NetworkSuggestionSummary {
 }
 
 export interface CompanyPostSummary {
+  id?: string;
+  authorName?: string;
   text?: string;
   publishedAt?: string;
+  contentType?: "post" | "article" | "document" | "video" | "poll";
   url?: string;
+  likes?: number;
+  comments?: number;
+  reposts?: number;
+  hashtags?: string[];
+  raw?: unknown;
 }
 
 export interface CompanyProfileSummary {
@@ -400,4 +408,84 @@ export interface JobDetailSummary extends JobSummary {
   companyFollowers?: number;
   companyIndustry?: string;
   companyEmployeeCount?: string;
+}
+
+export interface MonitorSourceDefinition {
+  name: string;
+  kind: "person" | "company";
+  identifier: string;
+}
+
+export interface MonitorSourceRun {
+  name: string;
+  kind: "person" | "company";
+  identifier: string;
+  command: string;
+  status: "ok" | "error";
+  attempts: number;
+  durationMs: number;
+  postsInWindow: number;
+  error?: string;
+}
+
+export interface MonitorPostEntry {
+  sourceName: string;
+  sourceKind: "person" | "company";
+  author: string;
+  publishedAt?: string;
+  text?: string;
+  contentType?: "post" | "article" | "document" | "video" | "poll";
+  url?: string;
+  likes: number;
+  comments: number;
+  reposts: number;
+  totalEngagement: number;
+  topic: string;
+  mentions: string[];
+}
+
+export interface MonitorSourceSummary {
+  name: string;
+  kind: "person" | "company";
+  postsInLast48h: number;
+  summary: string;
+}
+
+export interface MonitorTopicSummary {
+  topic: string;
+  sources: string[];
+  mentions: number;
+}
+
+export interface MonitorMentionSummary {
+  name: string;
+  sources: string[];
+}
+
+export interface MonitorRankedPost extends MonitorPostEntry {
+  rank: number;
+  primaryDriver: string;
+  secondaryDrivers: string[];
+  takeaway: string;
+}
+
+export interface MonitorUnderperformer {
+  author: string;
+  text?: string;
+  reason: string;
+  url?: string;
+}
+
+export interface MonitorReport {
+  generatedAt: string;
+  window: string;
+  sources: MonitorSourceRun[];
+  posts: MonitorPostEntry[];
+  headlineBriefing: string[];
+  sourceSummaries: MonitorSourceSummary[];
+  trendingTopics: MonitorTopicSummary[];
+  notableMentions: MonitorMentionSummary[];
+  topPosts: MonitorRankedPost[];
+  underperformers: MonitorUnderperformer[];
+  signalsForMark: string[];
 }

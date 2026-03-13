@@ -2,6 +2,7 @@ import Table from "cli-table3";
 
 import type {
   CompanyEmployeeSummary,
+  CompanyPostSummary,
   CompanyProfileSummary,
   ConnectionSummary,
   ContentSearchResultSummary,
@@ -10,6 +11,8 @@ import type {
   HashtagResearchSummary,
   JobDetailSummary,
   JobSummary,
+  MonitorRankedPost,
+  MonitorSourceRun,
   MutualConnectionsSummary,
   NetworkMapSummary,
   PostDetailSummary,
@@ -236,6 +239,42 @@ export function printCompanyEmployeesTable(items: CompanyEmployeeSummary[]): voi
   printTable(
     ["Name", "Title", "Location", "Degree", "Profile"],
     items.map((item) => [item.fullName, item.title, item.location, item.connectionDegree, item.profileUrl]),
+  );
+}
+
+export function printMonitorSourcesTable(items: MonitorSourceRun[]): void {
+  printTable(
+    ["Source", "Type", "Status", "Posts", "Attempts", "Duration (ms)", "Error"],
+    items.map((item) => [
+      item.name,
+      item.kind,
+      item.status,
+      item.postsInWindow,
+      item.attempts,
+      item.durationMs,
+      item.error,
+    ]),
+  );
+}
+
+export function printMonitorTopPostsTable(items: MonitorRankedPost[]): void {
+  printTable(
+    ["Rank", "Author", "Source", "Topic", "Engagement", "Post"],
+    items.map((item) => [
+      item.rank,
+      item.author,
+      item.sourceName,
+      item.topic,
+      item.totalEngagement,
+      item.text,
+    ]),
+  );
+}
+
+export function printCompanyPostsTable(items: CompanyPostSummary[]): void {
+  printTable(
+    ["Published", "Type", "Post", "Likes", "Comments", "Reposts", "URL"],
+    items.map((item) => [item.publishedAt, item.contentType, item.text, item.likes, item.comments, item.reposts, item.url]),
   );
 }
 

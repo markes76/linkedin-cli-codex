@@ -210,10 +210,12 @@ Useful fields:
 linkedin company "Anthropic" --json
 linkedin company "Anthropic" employees --limit 20 --json
 linkedin company "Anthropic" employees --title "engineer" --json
+linkedin company "Anthropic" posts --period 2d --limit 10 --json
 ```
 
 - `linkedin company <url-or-name>`: resolves a company through LinkedIn search, then scrapes the company about page.
 - `linkedin company <url-or-name> employees`: returns associated employees, preferring a current-company search filter when LinkedIn exposes one.
+- `linkedin company <url-or-name> posts`: scrapes the company posts feed directly and works better than generic content search for daily monitoring.
 
 Useful fields:
 
@@ -228,6 +230,12 @@ Useful fields:
 - `items[].title`
 - `items[].location`
 - `items[].connectionDegree`
+- `items[].authorName`
+- `items[].text`
+- `items[].publishedAt`
+- `items[].likes`
+- `items[].comments`
+- `items[].reposts`
 
 ## Analytics commands
 
@@ -248,6 +256,28 @@ Useful fields:
 - `totalComments`
 - `totalReposts`
 - `topPosts`
+
+## Monitor command
+
+```bash
+linkedin monitor watchlist --period 2d --json
+```
+
+- `linkedin monitor watchlist`: runs the built-in influencer + company watchlist with per-source timeout, retry, and backoff.
+- This is the safest way to run the recurring daily brief workflow because it reuses the browser-backed transport while continuing past individual source failures.
+
+Useful fields:
+
+- `sources[].name`
+- `sources[].status`
+- `sources[].postsInWindow`
+- `headlineBriefing`
+- `sourceSummaries`
+- `trendingTopics`
+- `notableMentions`
+- `topPosts`
+- `underperformers`
+- `signalsForMark`
 
 ## Search commands
 

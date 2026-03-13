@@ -368,9 +368,11 @@ Add `linkedin` or `linkedin-cli` as an allowed terminal tool and prefer the `--j
 - Voyager endpoints are undocumented. Some commands are best-effort and may need endpoint refreshes over time.
 - `profile`, `connections`, `feed`, `search`, and the new Phase 3 content/jobs reads are the primary working flows in this scaffold.
 - `profile --posts` is now the best route for "give me this person's recent posts," using their recent-activity page rather than generic content search.
+- `company <url-or-name> posts` is now the best route for company-page monitoring, using the dedicated company posts page rather than generic content search.
+- `monitor watchlist` now runs the built-in influencer + company brief workflow with per-source timeout, retry, and backoff controls.
 - `jobs saved` and `jobs applied` are wired to the LinkedIn jobs tracker and may return empty arrays on empty accounts.
 - `jobs recommended` remains a best-effort wrapper, not a dedicated LinkedIn recommendation endpoint.
-- CSV export currently exists through explicit command surfaces like `linkedin connections export --format csv`. The broader shared output layer from the roadmap, such as global `--csv`, `--md`, `--copy`, `--output`, and `--quiet`, is still pending.
+- The shared output layer is live: global `--json`, `--csv`, `--md`, `--html`, `--output`, `--copy`, and `--quiet` now work across the main command surface.
 - If you need to troubleshoot transport behavior, set `LINKEDIN_CLI_TRANSPORT=http` to force raw cookie replay or `LINKEDIN_CLI_BROWSER_HEADFUL=1` to run browser-backed reads in a visible Chrome window.
 
 ## Contributing
